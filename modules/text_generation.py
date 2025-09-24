@@ -29,6 +29,15 @@ def generate_reply(*args, **kwargs):
     shared.generation_lock.acquire()
     try:
         for result in _generate_reply(*args, **kwargs):
+            # Metrics: try to accumulate generated tokens if usage reported
+            try:
+                if isinstance(result, dict):
+                    usage = result.get('usage') or {}
+                    generated = usage.get('generated_tokens') or usage.get('completion_tokens')
+                    if generated:
+                        shared.metrics['tokens_total'] = shared.metrics.get('tokens_total', 0) + int(generated)
+            except Exception:
+                pass
             yield result
     finally:
         models.last_generation_time = time.time()

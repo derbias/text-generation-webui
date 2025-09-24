@@ -251,7 +251,13 @@ def create_interface():
             def _metrics():
                 # Prometheus text format minimal example
                 total = shared.metrics.get('requests_total', 0)
-                return f"requests_total {total}\n"
+                inflight = shared.metrics.get('in_flight', 0)
+                tokens = shared.metrics.get('tokens_total', 0)
+                return (
+                    f"requests_total {total}\n"
+                    f"in_flight {inflight}\n"
+                    f"tokens_total {tokens}\n"
+                )
         except Exception:
             pass
 

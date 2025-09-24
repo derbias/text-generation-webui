@@ -81,9 +81,16 @@ check_key = [Depends(verify_api_key)]
 check_admin_key = [Depends(verify_admin_key)]
 
 # CORS configuration (restrictable via env/flags later)
+allowed_origins = ["*"]
+if shared.args.cors_origin:
+    try:
+        allowed_origins = [x.strip() for x in shared.args.cors_origin.split(',') if x.strip()]
+    except Exception:
+        pass
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=allowed_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"]
