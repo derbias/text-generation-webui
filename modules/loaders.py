@@ -45,9 +45,89 @@ class LlamaCppAdapter(BaseLoader):
         raise NotImplementedError
 
 
+class ExLlamaV2Adapter(BaseLoader):
+    def load(self, model_name: str):
+        from modules.models import ExLlamav2_loader
+        return ExLlamav2_loader(model_name)
+
+    def unload(self):
+        pass
+
+    def generate(self, prompt, state):
+        raise NotImplementedError
+
+    def tokenize(self, text: str):
+        raise NotImplementedError
+
+
+class ExLlamaV3Adapter(BaseLoader):
+    def load(self, model_name: str):
+        from modules.models import ExLlamav3_loader
+        return ExLlamav3_loader(model_name)
+
+    def unload(self):
+        pass
+
+    def generate(self, prompt, state):
+        raise NotImplementedError
+
+    def tokenize(self, text: str):
+        raise NotImplementedError
+
+
+class ExLlamaV3HFAdapter(BaseLoader):
+    def load(self, model_name: str):
+        from modules.models import ExLlamav3_HF_loader
+        return ExLlamav3_HF_loader(model_name)
+
+    def unload(self):
+        pass
+
+    def generate(self, prompt, state):
+        raise NotImplementedError
+
+    def tokenize(self, text: str):
+        raise NotImplementedError
+
+
+class ExLlamaV2HFAdapter(BaseLoader):
+    def load(self, model_name: str):
+        from modules.models import ExLlamav2_HF_loader
+        return ExLlamav2_HF_loader(model_name)
+
+    def unload(self):
+        pass
+
+    def generate(self, prompt, state):
+        raise NotImplementedError
+
+    def tokenize(self, text: str):
+        raise NotImplementedError
+
+
+class TensorRTAdapter(BaseLoader):
+    def load(self, model_name: str):
+        from modules.models import TensorRT_LLM_loader
+        return TensorRT_LLM_loader(model_name)
+
+    def unload(self):
+        pass
+
+    def generate(self, prompt, state):
+        raise NotImplementedError
+
+    def tokenize(self, text: str):
+        raise NotImplementedError
+
+
 registry = {
     'Transformers': TransformersAdapter(),
     'llama.cpp': LlamaCppAdapter(),
+    'ExLlamav2': ExLlamaV2Adapter(),
+    'ExLlamav2_HF': ExLlamaV2HFAdapter(),
+    'ExLlamav3': ExLlamaV3Adapter(),
+    'ExLlamav3_HF': ExLlamaV3HFAdapter(),
+    'TensorRT-LLM': TensorRTAdapter(),
 }
 
 
