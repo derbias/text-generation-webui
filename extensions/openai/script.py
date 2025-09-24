@@ -26,10 +26,6 @@ from fastapi.responses import JSONResponse
 from sse_starlette import EventSourceResponse
 from starlette.concurrency import iterate_in_threadpool
 
-import extensions.openai.completions as OAIcompletions
-import extensions.openai.images as OAIimages
-import extensions.openai.logits as OAIlogits
-import extensions.openai.models as OAImodels
 from extensions.openai.errors import ServiceUnavailableError
 from extensions.openai.tokens import token_count, token_decode, token_encode
 from extensions.openai.utils import _start_cloudflared
@@ -167,6 +163,7 @@ async def options_route():
 
 @app.post('/v1/completions', response_model=CompletionResponse, dependencies=check_key)
 async def openai_completions(request: Request, request_data: CompletionRequest):
+    import extensions.openai.completions as OAIcompletions
     path = request.url.path
     is_legacy = "/generate" in path
 
@@ -200,6 +197,7 @@ async def openai_completions(request: Request, request_data: CompletionRequest):
 
 @app.post('/v1/chat/completions', response_model=ChatCompletionResponse, dependencies=check_key)
 async def openai_chat_completions(request: Request, request_data: ChatCompletionRequest):
+    import extensions.openai.completions as OAIcompletions
     path = request.url.path
     is_legacy = "/generate" in path
 
@@ -234,6 +232,7 @@ async def openai_chat_completions(request: Request, request_data: ChatCompletion
 @app.get("/v1/models", dependencies=check_key)
 @app.get("/v1/models/{model}", dependencies=check_key)
 async def handle_models(request: Request):
+    import extensions.openai.models as OAImodels
     path = request.url.path
     is_list = request.url.path.split('?')[0].split('#')[0] == '/v1/models'
 
@@ -292,6 +291,7 @@ async def handle_audio_transcription(request: Request):
 
 @app.post('/v1/images/generations', dependencies=check_key)
 async def handle_image_generation(request: Request):
+    import extensions.openai.images as OAIimages
 
     if not os.environ.get('SD_WEBUI_URL', params.get('sd_webui_url', '')):
         raise ServiceUnavailableError("Stable Diffusion not available. SD_WEBUI_URL not set.")
@@ -359,6 +359,7 @@ async def handle_token_count(request_data: EncodeRequest):
 
 @app.post("/v1/internal/logits", response_model=LogitsResponse, dependencies=check_key)
 async def handle_logits(request_data: LogitsRequest):
+    import extensions.openai.logits as OAIlogits
     '''
     Given a prompt, returns the top 50 most likely logits as a dict.
     The keys are the tokens, and the values are the probabilities.
@@ -369,6 +370,7 @@ async def handle_logits(request_data: LogitsRequest):
 
 @app.post('/v1/internal/chat-prompt', response_model=ChatPromptResponse, dependencies=check_key)
 async def handle_chat_prompt(request: Request, request_data: ChatCompletionRequest):
+    import extensions.openai.completions as OAIcompletions
     path = request.url.path
     is_legacy = "/generate" in path
     generator = OAIcompletions.chat_completions_common(to_dict(request_data), is_legacy=is_legacy, prompt_only=True)
@@ -384,18 +386,21 @@ async def handle_stop_generation(request: Request):
 
 @app.get("/v1/internal/model/info", response_model=ModelInfoResponse, dependencies=check_key)
 async def handle_model_info():
+    import extensions.openai.models as OAImodels
     payload = OAImodels.get_current_model_info()
     return JSONResponse(content=payload)
 
 
 @app.get("/v1/internal/model/list", response_model=ModelListResponse, dependencies=check_admin_key)
 async def handle_list_models():
+    import extensions.openai.models as OAImodels
     payload = OAImodels.list_models()
     return JSONResponse(content=payload)
 
 
 @app.post("/v1/internal/model/load", dependencies=check_admin_key)
 async def handle_load_model(request_data: LoadModelRequest):
+    import extensions.openai.models as OAImodels
     '''
     This endpoint is experimental and may change in the future.
 
@@ -438,12 +443,14 @@ async def handle_unload_model():
 
 @app.get("/v1/internal/lora/list", response_model=LoraListResponse, dependencies=check_admin_key)
 async def handle_list_loras():
+    import extensions.openai.models as OAImodels
     response = OAImodels.list_loras()
     return JSONResponse(content=response)
 
 
 @app.post("/v1/internal/lora/load", dependencies=check_admin_key)
 async def handle_load_loras(request_data: LoadLorasRequest):
+    import extensions.openai.models as OAImodels
     try:
         OAImodels.load_loras(request_data.lora_names)
         return JSONResponse(content="OK")
@@ -454,6 +461,7 @@ async def handle_load_loras(request_data: LoadLorasRequest):
 
 @app.post("/v1/internal/lora/unload", dependencies=check_admin_key)
 async def handle_unload_loras():
+    import extensions.openai.models as OAImodels
     OAImodels.unload_all_loras()
     return JSONResponse(content="OK")
 
