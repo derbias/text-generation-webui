@@ -267,6 +267,38 @@ def create_interface():
                     mname = 'endpoint_requests_total'
                     lines.append(f'{mname}{{path="{path}"}} {count}')
                 return "\n".join(lines) + "\n"
+
+            # Discovery endpoint for enhanced model browsing (read-only)
+            from modules.model_finder import discover_models, clear_discovery_cache
+
+            @app.get('/internal/discover')
+            def _discover_models(
+                pipelines: str = '',
+                q: str = '',
+                limit: int = 100,
+                ttl: int = 900
+            ):
+                try:
+                    plist = [p for p in pipelines.split(',') if p] if pipelines else None
+                    result = discover_models(
+                        pipelines=plist,
+                        query=q or None,
+                        limit=min(max(limit, 1), 500),
+                        filters=None,
+                        include_meta=True,
+                        ttl_seconds=max(ttl, 0)
+                    )
+                    return result
+                except Exception as e:
+                    return {'error': str(e)}
+
+            @app.post('/internal/discover/cache/clear')
+            def _discover_cache_clear():
+                try:
+                    clear_discovery_cache()
+                    return {'status': 'cleared'}
+                except Exception as e:
+                    return {'error': str(e)}
         except Exception:
             pass
 

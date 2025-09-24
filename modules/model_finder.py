@@ -2,7 +2,9 @@ import torch
 import subprocess
 import json
 import re
-from huggingface_hub import HfApi
+from typing import Dict, List, Optional, Tuple, Any
+from time import time
+from huggingface_hub import HfApi, ModelFilter
 from modules.logging_colors import logger
 
 def get_system_info():
@@ -143,3 +145,166 @@ def find_compatible_models():
         return output
     else:
         return f"No compatible models found based on current heuristics for your {system_info['gpu_type']} with {system_info['vram_gb']} GB VRAM."
+
+
+# ---------------------------------------------
+# Enhanced multi-pipeline discovery with caching
+# ---------------------------------------------
+
+_DISCOVERY_CACHE: Dict[str, Tuple[float, Any]] = {}
+_DEFAULT_TTL_SECONDS = 900
+
+
+def _make_cache_key(
+    pipelines: Optional[List[str]],
+    query: Optional[str],
+    limit: int,
+    filters: Optional[Dict[str, Any]],
+    include_meta: bool
+) -> str:
+    return str((tuple(sorted(pipelines or [])), query or '', limit, tuple(sorted((filters or {}).items())), include_meta))
+
+
+def _get_from_cache(key: str, ttl_seconds: int) -> Optional[Any]:
+    entry = _DISCOVERY_CACHE.get(key)
+    if not entry:
+        return None
+    ts, data = entry
+    if time() - ts <= ttl_seconds:
+        return data
+    try:
+        del _DISCOVERY_CACHE[key]
+    except Exception:
+        pass
+    return None
+
+
+def _set_cache(key: str, data: Any) -> None:
+    _DISCOVERY_CACHE[key] = (time(), data)
+
+
+def clear_discovery_cache() -> None:
+    _DISCOVERY_CACHE.clear()
+
+
+def _extract_model_metadata(mi) -> Dict[str, Any]:
+    # Safely extract known fields; fall back to None if missing
+    meta = {
+        'model_id': getattr(mi, 'modelId', None),
+        'sha': getattr(mi, 'sha', None),
+        'pipeline_tag': getattr(mi, 'pipeline_tag', None),
+        'private': getattr(mi, 'private', None),
+        'gated': getattr(mi, 'gated', None),
+        'likes': getattr(mi, 'likes', None),
+        'downloads': getattr(mi, 'downloads', None),
+        'tags': getattr(mi, 'tags', None),
+        'last_modified': getattr(mi, 'lastModified', None),
+        'siblings': [s.rfilename for s in getattr(mi, 'siblings', [])] if getattr(mi, 'siblings', None) else None,
+    }
+
+    card = getattr(mi, 'cardData', None) or {}
+    meta.update({
+        'license': card.get('license') if isinstance(card, dict) else None,
+        'datasets': card.get('datasets') if isinstance(card, dict) else None,
+        'model_size': card.get('model_size') if isinstance(card, dict) else None,
+        'architecture': card.get('model_architecture') or card.get('architecture') if isinstance(card, dict) else None,
+        'language': card.get('language') if isinstance(card, dict) else None,
+        'library_name': getattr(mi, 'library_name', None),
+        'library_version': getattr(mi, 'library_version', None),
+        'inference': card.get('inference') if isinstance(card, dict) else None,
+        'training': card.get('training') if isinstance(card, dict) else None,
+        'metrics': card.get('metrics') if isinstance(card, dict) else None,
+        'example_inputs': card.get('example_input') or card.get('example_inputs') if isinstance(card, dict) else None,
+        'example_outputs': card.get('example_output') or card.get('example_outputs') if isinstance(card, dict) else None,
+    })
+
+    # Roughly infer params if present
+    params_b = None
+    size_str = None
+    try:
+        size_str = (card.get('model_size') or '').lower() if isinstance(card, dict) else None
+    except Exception:
+        pass
+    if size_str:
+        m = re.search(r'(\d+\.?\d*)\s*[bB]', size_str)
+        if m:
+            try:
+                params_b = float(m.group(1))
+            except Exception:
+                params_b = None
+    if params_b is None and getattr(mi, 'safetensors', None) and isinstance(mi.safetensors, dict) and mi.safetensors.get('total_size'):
+        total_size_gb = mi.safetensors['total_size'] / (1024 ** 3)
+        params_b = total_size_gb / 2.0
+    meta['parameters_b'] = params_b
+    return meta
+
+
+def discover_models(
+    pipelines: Optional[List[str]] = None,
+    query: Optional[str] = None,
+    limit: int = 100,
+    filters: Optional[Dict[str, Any]] = None,
+    include_meta: bool = True,
+    ttl_seconds: int = _DEFAULT_TTL_SECONDS
+) -> Dict[str, Any]:
+    """
+    Discover models across multiple pipelines with optional filters and metadata.
+    Returns a dict with keys: items (list), total (int), pipelines (list)
+    """
+    api = HfApi()
+    pipelines = pipelines or [
+        'text-generation',
+        'text2text-generation',
+        'image-text-to-text',
+        'text-to-image',
+        'audio-to-audio',
+        'automatic-speech-recognition'
+    ]
+    filters = filters or {}
+
+    key = _make_cache_key(pipelines, query, limit, filters, include_meta)
+    cached = _get_from_cache(key, ttl_seconds)
+    if cached is not None:
+        return cached
+
+    all_items: List[Dict[str, Any]] = []
+    for ptag in pipelines:
+        try:
+            model_filter = ModelFilter(
+                task=ptag,
+                tags=filters.get('tags') if filters else None,
+                library=filters.get('library') if filters else None,
+                dataset=filters.get('dataset') if filters else None,
+                language=filters.get('language') if filters else None,
+            )
+        except Exception:
+            model_filter = None
+
+        try:
+            results = api.list_models(
+                filter=model_filter,
+                search=query,
+                sort=filters.get('sort') if filters else 'downloads',
+                direction=filters.get('direction') if filters else -1,
+                limit=limit
+            )
+        except Exception as e:
+            logger.warning(f"HF discovery failed for pipeline {ptag}: {e}")
+            results = []
+
+        for mi in results:
+            item = {
+                'model_id': getattr(mi, 'modelId', None),
+                'pipeline_tag': getattr(mi, 'pipeline_tag', ptag),
+            }
+            if include_meta:
+                item.update(_extract_model_metadata(mi))
+            all_items.append(item)
+
+    payload = {
+        'items': all_items,
+        'total': len(all_items),
+        'pipelines': pipelines,
+    }
+    _set_cache(key, payload)
+    return payload
