@@ -51,6 +51,7 @@ from modules import (
     ui_default,
     ui_file_saving,
     ui_model_menu,
+        ui_system,
     ui_notebook,
     ui_parameters,
     ui_session,
@@ -166,6 +167,7 @@ def create_interface():
         if not shared.args.portable:
             training.create_ui()  # Training tab
         ui_session.create_ui()  # Session tab
+        ui_system.create_ui()  # System tab
 
         # Generation events
         ui_chat.create_event_handlers()
@@ -176,6 +178,7 @@ def create_interface():
         ui_file_saving.create_event_handlers()
         ui_parameters.create_event_handlers()
         ui_model_menu.create_event_handlers()
+        ui_system.create_event_handlers()
 
         # UI persistence events
         ui.setup_auto_save()

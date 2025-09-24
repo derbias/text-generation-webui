@@ -33,6 +33,7 @@ def create_ui():
                     shared.gradio['model_menu'] = gr.Dropdown(choices=utils.get_available_models(), value=lambda: shared.model_name, label='Model', elem_classes='slim-dropdown', interactive=not mu)
                     ui.create_refresh_button(shared.gradio['model_menu'], lambda: None, lambda: {'choices': utils.get_available_models()}, 'refresh-button', interactive=not mu)
                     shared.gradio['preflight_model'] = gr.Button("Preflight", elem_classes='refresh-button', interactive=not mu)
+                    shared.gradio['apply_suggestions'] = gr.Button("Apply suggestions", elem_classes='refresh-button', interactive=not mu)
                     shared.gradio['load_model'] = gr.Button("Load", elem_classes='refresh-button', interactive=not mu)
                     shared.gradio['unload_model'] = gr.Button("Unload", elem_classes='refresh-button', interactive=not mu)
                     shared.gradio['save_model_settings'] = gr.Button("Save settings", elem_classes='refresh-button', interactive=not mu)
@@ -161,9 +162,26 @@ def create_event_handlers():
 
     # Preflight: validate settings without persisting or loading
     shared.gradio['preflight_model'].click(
-        ui.gather_interface_values, gradio(shared.input_elements), gradio('interface_state')
+        ui.gather_interface_values,
+        gradio(shared.input_elements),
+        gradio('interface_state')
     ).then(
-        preflight_model, gradio('model_menu', 'interface_state'), gradio('model_status'), show_progress=True
+        preflight_model,
+        gradio('model_menu', 'interface_state'),
+        gradio('model_status'),
+        show_progress=True
+    )
+
+    # Apply suggestions: update gpu_layers and vram_info using auto-adjust
+    shared.gradio['apply_suggestions'].click(
+        ui.gather_interface_values,
+        gradio(shared.input_elements),
+        gradio('interface_state')
+    ).then(
+        apply_preflight_suggestions,
+        gradio('model_menu', 'interface_state'),
+        gradio('gpu_layers', 'vram_info'),
+        show_progress=False
     )
 
     shared.gradio['unload_model'].click(handle_unload_model_click, None, gradio('model_status'), show_progress=False).then(
@@ -434,6 +452,36 @@ def preflight_model(selected_model, state):
         exc = traceback.format_exc()
         logger.error('Preflight failed.')
         return exc.replace('\n', '\n\n')
+
+
+def apply_preflight_suggestions(selected_model, state):
+    try:
+        if not selected_model or selected_model == 'None':
+            return [gr.update(), gr.update()]
+
+        state = apply_model_settings_to_state(selected_model, state)
+        loader = state.get('loader') or shared.args.loader
+        ctx_size = state.get('ctx_size', shared.args.ctx_size)
+        cache_type = state.get('cache_type', getattr(shared.args, 'cache_type', None))
+        gpu_layers = state.get('gpu_layers', getattr(shared.args, 'gpu_layers', 0))
+
+        with temporary_settings(shared.settings, **{k: v for k, v in state.items() if k in shared.settings}):
+            with temporary_attrs(shared.args, loader=loader, ctx_size=ctx_size, cache_type=cache_type):
+                vram_info, adjusted_layers = update_gpu_layers_and_vram(
+                    shared.args.loader,
+                    selected_model,
+                    gpu_layers,
+                    shared.args.ctx_size,
+                    shared.args.cache_type,
+                    auto_adjust=True,
+                    for_ui=True
+                )
+
+        gpu_layers_update = gr.update(value=adjusted_layers if adjusted_layers is not None else gpu_layers)
+        vram_info_update = gr.update(value=vram_info)
+        return [gpu_layers_update, vram_info_update]
+    except Exception:
+        return [gr.update(), gr.update()]
 
 
 def get_initial_vram_info():
