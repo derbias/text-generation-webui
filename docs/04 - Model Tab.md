@@ -127,3 +127,9 @@ Here you can download a model or LoRA directly from the https://huggingface.co/ 
 In the input field, you can enter either the Hugging Face username/model path (like `facebook/galactica-125m`) or the full model URL (like `https://huggingface.co/facebook/galactica-125m`). To specify a branch, add it at the end after a ":" character like this: `facebook/galactica-125m:main`. 
 
 To download a single file, as necessary for models in GGUF format, you can click on "Get file list" after entering the model path in the input field, and then copy and paste the desired file name in the "File name" field before clicking on "Download".
+
+## Preflight and Apply suggestions
+
+- Use the Preflight button to estimate VRAM usage and compute suggested `gpu-layers` without loading the model.
+- Click Apply suggestions to write the suggested `gpu-layers` into the UI and refresh the VRAM estimator.
+- This uses a temporary settings context and does not persist changes until you press Load or Save settings.
