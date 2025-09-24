@@ -57,6 +57,7 @@ from modules import (
     utils
 )
 from modules.chat import generate_pfp_cache
+from modules import config as config_module
 from modules.extensions import apply_extensions
 from modules.LoRA import add_lora_to_model
 from modules.models import load_model, unload_model_if_idle
@@ -217,8 +218,43 @@ def create_interface():
         extensions_module.create_extensions_tabs()  # Extensions tabs
         extensions_module.create_extensions_block()  # Extensions block
 
+        # Expose lightweight health/metrics endpoints
+        # Access underlying FastAPI app via .app
+        try:
+            app = shared.gradio['interface'].app
+
+            @app.get('/healthz')
+            def _healthz():
+                return {
+                    'status': 'ok',
+                    'model': shared.model_name,
+                    'loader': shared.args.loader,
+                }
+
+            # Minimal in-memory counters
+            if not hasattr(shared, 'metrics'):
+                shared.metrics = {'requests_total': 0}
+
+            @app.middleware('http')
+            async def _metrics_mw(request, call_next):
+                try:
+                    shared.metrics['requests_total'] += 1
+                except Exception:
+                    pass
+                response = await call_next(request)
+                return response
+
+            @app.get('/metrics')
+            def _metrics():
+                # Prometheus text format minimal example
+                total = shared.metrics.get('requests_total', 0)
+                return f"requests_total {total}\n"
+        except Exception:
+            pass
+
     # Launch the interface
-    shared.gradio['interface'].queue()
+    # Configure queue limits for backpressure
+    shared.gradio['interface'].queue(concurrency_count=shared.args.threads or 4, max_size=64)
     with OpenMonkeyPatch():
         shared.gradio['interface'].launch(
             max_threads=64,
@@ -250,9 +286,7 @@ if __name__ == "__main__":
 
     if settings_file is not None:
         logger.info(f"Loading settings from \"{settings_file}\"")
-        with open(settings_file, 'r', encoding='utf-8') as f:
-            new_settings = yaml.safe_load(f.read())
-
+        new_settings = config_module.load_and_validate(settings_file)
         if new_settings:
             shared.settings.update(new_settings)
 
