@@ -22,6 +22,10 @@ def generate_reply(*args, **kwargs):
         from modules.models import load_model
         shared.model, shared.tokenizer = load_model(shared.model_name)
 
+    # Metrics: track in-flight
+    if not hasattr(shared, 'metrics'):
+        shared.metrics = {'requests_total': 0, 'in_flight': 0}
+    shared.metrics['in_flight'] = shared.metrics.get('in_flight', 0) + 1
     shared.generation_lock.acquire()
     try:
         for result in _generate_reply(*args, **kwargs):
@@ -29,6 +33,7 @@ def generate_reply(*args, **kwargs):
     finally:
         models.last_generation_time = time.time()
         shared.generation_lock.release()
+        shared.metrics['in_flight'] = max(0, shared.metrics.get('in_flight', 0) - 1)
 
 
 def _generate_reply(question, state, stopping_strings=None, is_chat=False, escape_html=False, for_ui=False):

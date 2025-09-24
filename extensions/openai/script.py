@@ -10,6 +10,8 @@ from threading import Thread
 import uvicorn
 from fastapi import Depends, FastAPI, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.middleware.base import BaseHTTPMiddleware
+import time
 from fastapi.requests import Request
 from fastapi.responses import JSONResponse
 from pydub import AudioSegment
@@ -78,7 +80,7 @@ app = FastAPI()
 check_key = [Depends(verify_api_key)]
 check_admin_key = [Depends(verify_admin_key)]
 
-# Configure CORS settings to allow all origins, methods, and headers
+# CORS configuration (restrictable via env/flags later)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -86,6 +88,30 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"]
 )
+
+
+# Simple per-IP rate limiter
+class RateLimitMiddleware(BaseHTTPMiddleware):
+    def __init__(self, app, requests_per_minute: int = 120):
+        super().__init__(app)
+        self.capacity = max(1, requests_per_minute)
+        self.window = 60
+        self.bucket = {}
+
+    async def dispatch(self, request, call_next):
+        client_ip = request.client.host if request.client else 'unknown'
+        now = int(time.time())
+        bucket = self.bucket.get(client_ip)
+        if not bucket or now - bucket['ts'] >= self.window:
+            bucket = {'ts': now, 'count': 0}
+        bucket['count'] += 1
+        self.bucket[client_ip] = bucket
+        if bucket['count'] > self.capacity:
+            return JSONResponse(status_code=429, content={'detail': 'Too Many Requests'})
+        return await call_next(request)
+
+
+app.add_middleware(RateLimitMiddleware)
 
 
 @app.middleware("http")

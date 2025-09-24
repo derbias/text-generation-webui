@@ -30,6 +30,9 @@ def get_next_logits(*args, **kwargs):
         models.last_generation_time = time.time()
         shared.generation_lock.release()
 
+    # Metrics
+    if hasattr(shared, 'metrics'):
+        shared.metrics['requests_total'] = shared.metrics.get('requests_total', 0) + 1
     return result
 
 
