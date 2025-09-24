@@ -4,6 +4,7 @@ import time
 import modules.shared as shared
 from modules.logging_colors import logger
 from modules.models_settings import get_model_metadata
+from modules.loaders import load_via_baseloader
 from modules.utils import resolve_model_path
 
 last_generation_time = time.time()
@@ -40,7 +41,11 @@ def load_model(model_name, loader=None):
         sampler_hijack.hijack_samplers()
 
     shared.args.loader = loader
-    output = load_func_map[loader](model_name)
+    try:
+        output = load_via_baseloader(model_name, loader)
+    except Exception:
+        # Fallback to existing map for loaders without adapters yet
+        output = load_func_map[loader](model_name)
     if type(output) is tuple:
         model, tokenizer = output
     else:

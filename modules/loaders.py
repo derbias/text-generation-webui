@@ -11,6 +11,51 @@ class BaseLoader:
 
     def tokenize(self, text: str):
         raise NotImplementedError
+
+
+class TransformersAdapter(BaseLoader):
+    def load(self, model_name: str):
+        from modules.transformers_loader import load_model_HF, load_tokenizer
+        model = load_model_HF(model_name)
+        tok = load_tokenizer(model_name)
+        return model, tok
+
+    def unload(self):
+        pass
+
+    def generate(self, prompt, state):
+        raise NotImplementedError
+
+    def tokenize(self, text: str):
+        raise NotImplementedError
+
+
+class LlamaCppAdapter(BaseLoader):
+    def load(self, model_name: str):
+        from modules.models import llama_cpp_server_loader
+        return llama_cpp_server_loader(model_name)
+
+    def unload(self):
+        pass
+
+    def generate(self, prompt, state):
+        raise NotImplementedError
+
+    def tokenize(self, text: str):
+        raise NotImplementedError
+
+
+registry = {
+    'Transformers': TransformersAdapter(),
+    'llama.cpp': LlamaCppAdapter(),
+}
+
+
+def load_via_baseloader(model_name: str, loader_name: str):
+    adapter = registry.get(loader_name)
+    if not adapter:
+        raise ValueError(f"No BaseLoader adapter for {loader_name}")
+    return adapter.load(model_name)
 import functools
 from collections import OrderedDict
 
