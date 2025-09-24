@@ -1,3 +1,26 @@
+# OpenAI API
+## Security and CORS
+
+- When `--public-api` is enabled, an API key is required: `--api-key YOUR_KEY`.
+- CORS defaults:
+  - If not `--listen`/`--public-api`, allowed origins are `http://127.0.0.1` and `http://localhost`.
+  - Override with `--cors-origin=https://site1,https://site2`.
+- Rate limiting flags:
+  - `--rate-limit-rpm` (default 120)
+  - `--rate-limit-window` seconds (default 60)
+
+## Metrics
+
+The UI exposes `/metrics` (Prometheus text) with at least:
+
+```
+requests_total <num>
+in_flight <num>
+tokens_total <num>
+queue_depth <num>
+endpoint_requests_total{path="/v1/chat/completions"} <num>
+```
+
 ## OpenAI compatible API
 
 The main API for this project is meant to be a drop-in replacement to the OpenAI API, including Chat and Completions endpoints.

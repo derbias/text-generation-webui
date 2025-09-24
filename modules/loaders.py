@@ -1,3 +1,141 @@
+# Base loader protocol (scaffold)
+class BaseLoader:
+    def load(self, model_name: str):
+        raise NotImplementedError
+
+    def unload(self):
+        raise NotImplementedError
+
+    def generate(self, prompt, state):
+        raise NotImplementedError
+
+    def tokenize(self, text: str):
+        raise NotImplementedError
+
+
+class TransformersAdapter(BaseLoader):
+    def load(self, model_name: str):
+        from modules.transformers_loader import load_model_HF, load_tokenizer
+        model = load_model_HF(model_name)
+        tok = load_tokenizer(model_name)
+        return model, tok
+
+    def unload(self):
+        pass
+
+    def generate(self, prompt, state):
+        raise NotImplementedError
+
+    def tokenize(self, text: str):
+        raise NotImplementedError
+
+
+class LlamaCppAdapter(BaseLoader):
+    def load(self, model_name: str):
+        from modules.models import llama_cpp_server_loader
+        return llama_cpp_server_loader(model_name)
+
+    def unload(self):
+        pass
+
+    def generate(self, prompt, state):
+        raise NotImplementedError
+
+    def tokenize(self, text: str):
+        raise NotImplementedError
+
+
+class ExLlamaV2Adapter(BaseLoader):
+    def load(self, model_name: str):
+        from modules.models import ExLlamav2_loader
+        return ExLlamav2_loader(model_name)
+
+    def unload(self):
+        pass
+
+    def generate(self, prompt, state):
+        raise NotImplementedError
+
+    def tokenize(self, text: str):
+        raise NotImplementedError
+
+
+class ExLlamaV3Adapter(BaseLoader):
+    def load(self, model_name: str):
+        from modules.models import ExLlamav3_loader
+        return ExLlamav3_loader(model_name)
+
+    def unload(self):
+        pass
+
+    def generate(self, prompt, state):
+        raise NotImplementedError
+
+    def tokenize(self, text: str):
+        raise NotImplementedError
+
+
+class ExLlamaV3HFAdapter(BaseLoader):
+    def load(self, model_name: str):
+        from modules.models import ExLlamav3_HF_loader
+        return ExLlamav3_HF_loader(model_name)
+
+    def unload(self):
+        pass
+
+    def generate(self, prompt, state):
+        raise NotImplementedError
+
+    def tokenize(self, text: str):
+        raise NotImplementedError
+
+
+class ExLlamaV2HFAdapter(BaseLoader):
+    def load(self, model_name: str):
+        from modules.models import ExLlamav2_HF_loader
+        return ExLlamav2_HF_loader(model_name)
+
+    def unload(self):
+        pass
+
+    def generate(self, prompt, state):
+        raise NotImplementedError
+
+    def tokenize(self, text: str):
+        raise NotImplementedError
+
+
+class TensorRTAdapter(BaseLoader):
+    def load(self, model_name: str):
+        from modules.models import TensorRT_LLM_loader
+        return TensorRT_LLM_loader(model_name)
+
+    def unload(self):
+        pass
+
+    def generate(self, prompt, state):
+        raise NotImplementedError
+
+    def tokenize(self, text: str):
+        raise NotImplementedError
+
+
+registry = {
+    'Transformers': TransformersAdapter(),
+    'llama.cpp': LlamaCppAdapter(),
+    'ExLlamav2': ExLlamaV2Adapter(),
+    'ExLlamav2_HF': ExLlamaV2HFAdapter(),
+    'ExLlamav3': ExLlamaV3Adapter(),
+    'ExLlamav3_HF': ExLlamaV3HFAdapter(),
+    'TensorRT-LLM': TensorRTAdapter(),
+}
+
+
+def load_via_baseloader(model_name: str, loader_name: str):
+    adapter = registry.get(loader_name)
+    if not adapter:
+        raise ValueError(f"No BaseLoader adapter for {loader_name}")
+    return adapter.load(model_name)
 import functools
 from collections import OrderedDict
 

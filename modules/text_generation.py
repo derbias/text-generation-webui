@@ -22,13 +22,35 @@ def generate_reply(*args, **kwargs):
         from modules.models import load_model
         shared.model, shared.tokenizer = load_model(shared.model_name)
 
+    # Metrics: track in-flight
+    if not hasattr(shared, 'metrics'):
+        shared.metrics = {'requests_total': 0, 'in_flight': 0}
+    shared.metrics['in_flight'] = shared.metrics.get('in_flight', 0) + 1
+    start_time = time.time()
+    start_tokens = shared.metrics.get('tokens_total', 0)
     shared.generation_lock.acquire()
     try:
         for result in _generate_reply(*args, **kwargs):
+            # Metrics: try to accumulate generated tokens if usage reported
+            try:
+                if isinstance(result, dict):
+                    usage = result.get('usage') or {}
+                    generated = usage.get('generated_tokens') or usage.get('completion_tokens')
+                    if generated:
+                        shared.metrics['tokens_total'] = shared.metrics.get('tokens_total', 0) + int(generated)
+            except Exception:
+                pass
             yield result
     finally:
         models.last_generation_time = time.time()
         shared.generation_lock.release()
+        shared.metrics['in_flight'] = max(0, shared.metrics.get('in_flight', 0) - 1)
+        try:
+            elapsed = max(1e-6, time.time() - start_time)
+            delta_tokens = max(0, shared.metrics.get('tokens_total', 0) - start_tokens)
+            shared.metrics['tokens_per_sec'] = delta_tokens / elapsed
+        except Exception:
+            pass
 
 
 def _generate_reply(question, state, stopping_strings=None, is_chat=False, escape_html=False, for_ui=False):

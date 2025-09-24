@@ -8,7 +8,7 @@ from pathlib import Path
 
 import gradio as gr
 
-from modules import loaders, shared, ui, utils
+from modules import loaders, shared, ui, utils, model_finder
 from modules.logging_colors import logger
 from modules.LoRA import add_lora_to_model
 from modules.models import load_model, unload_model
@@ -20,7 +20,8 @@ from modules.models_settings import (
     update_gpu_layers_and_vram,
     update_model_parameters
 )
-from modules.utils import gradio
+from modules.utils import gradio, temporary_settings, temporary_attrs
+from modules.hardware import suggest_gpu_layers
 
 
 def create_ui():
@@ -32,6 +33,8 @@ def create_ui():
                 with gr.Row():
                     shared.gradio['model_menu'] = gr.Dropdown(choices=utils.get_available_models(), value=lambda: shared.model_name, label='Model', elem_classes='slim-dropdown', interactive=not mu)
                     ui.create_refresh_button(shared.gradio['model_menu'], lambda: None, lambda: {'choices': utils.get_available_models()}, 'refresh-button', interactive=not mu)
+                    shared.gradio['preflight_model'] = gr.Button("Preflight", elem_classes='refresh-button', interactive=not mu)
+                    shared.gradio['apply_suggestions'] = gr.Button("Apply suggestions", elem_classes='refresh-button', interactive=not mu)
                     shared.gradio['load_model'] = gr.Button("Load", elem_classes='refresh-button', interactive=not mu)
                     shared.gradio['unload_model'] = gr.Button("Unload", elem_classes='refresh-button', interactive=not mu)
                     shared.gradio['save_model_settings'] = gr.Button("Save settings", elem_classes='refresh-button', interactive=not mu)
@@ -121,6 +124,9 @@ def create_ui():
                     with gr.Row():
                         shared.gradio['download_model_button'] = gr.Button("Download", variant='primary', interactive=not mu)
                         shared.gradio['get_file_list'] = gr.Button("Get file list", interactive=not mu)
+                    with gr.Row():
+                        shared.gradio['find_compatible_models_button'] = gr.Button("Find Compatible Models", elem_classes='refresh-button', interactive=not mu)
+                    shared.gradio['compatible_models_results'] = gr.Markdown("Compatible models will appear here.")
 
                 with gr.Tab("Customize instruction template"):
                     with gr.Row():
@@ -155,6 +161,30 @@ def create_event_handlers():
         partial(load_model_wrapper, autoload=True), gradio('model_menu', 'loader'), gradio('model_status'), show_progress=True).success(
         handle_load_model_event_final, gradio('truncation_length', 'loader', 'interface_state'), gradio('truncation_length', 'filter_by_loader'), show_progress=False)
 
+    # Preflight: validate settings without persisting or loading
+    shared.gradio['preflight_model'].click(
+        ui.gather_interface_values,
+        gradio(shared.input_elements),
+        gradio('interface_state')
+    ).then(
+        preflight_model,
+        gradio('model_menu', 'interface_state'),
+        gradio('model_status'),
+        show_progress=True
+    )
+
+    # Apply suggestions: update gpu_layers and vram_info using auto-adjust
+    shared.gradio['apply_suggestions'].click(
+        ui.gather_interface_values,
+        gradio(shared.input_elements),
+        gradio('interface_state')
+    ).then(
+        apply_preflight_suggestions,
+        gradio('model_menu', 'interface_state'),
+        gradio('gpu_layers', 'vram_info'),
+        show_progress=False
+    )
+
     shared.gradio['unload_model'].click(handle_unload_model_click, None, gradio('model_status'), show_progress=False).then(
         partial(update_gpu_layers_and_vram, auto_adjust=True), gradio('loader', 'model_menu', 'gpu_layers', 'ctx_size', 'cache_type'), gradio('vram_info', 'gpu_layers'), show_progress=False)
 
@@ -181,6 +211,14 @@ def create_event_handlers():
     shared.gradio['download_model_button'].click(download_model_wrapper, gradio('custom_model_menu', 'download_specific_file'), gradio('model_status'), show_progress=True)
     shared.gradio['get_file_list'].click(partial(download_model_wrapper, return_links=True), gradio('custom_model_menu', 'download_specific_file'), gradio('model_status'), show_progress=True)
     shared.gradio['customized_template_submit'].click(save_instruction_template, gradio('model_menu', 'customized_template'), gradio('model_status'), show_progress=True)
+
+    # New event handler for finding compatible models
+    shared.gradio['find_compatible_models_button'].click(
+        model_finder.find_compatible_models,
+        None, # No inputs for this function yet
+        shared.gradio['compatible_models_results'],
+        show_progress=True
+    )
 
 
 def load_model_wrapper(selected_model, loader, autoload=False):
@@ -375,6 +413,79 @@ def update_truncation_length(current_length, state):
             return state['ctx_size']
 
     return current_length
+
+
+def preflight_model(selected_model, state):
+    try:
+        if not selected_model or selected_model == 'None':
+            return "Please select a model to preflight."
+
+        # Apply model defaults into the state (like initial load path)
+        state = apply_model_settings_to_state(selected_model, state)
+
+        # Quick path check
+        path_to_model = utils.resolve_model_path(selected_model)
+        if not path_to_model.exists():
+            return f"Model path not found: `{path_to_model}`"
+
+        # Prepare temporary overrides
+        loader = state.get('loader') or shared.args.loader
+        ctx_size = state.get('ctx_size', shared.args.ctx_size)
+        cache_type = state.get('cache_type', getattr(shared.args, 'cache_type', None))
+        gpu_layers = state.get('gpu_layers', getattr(shared.args, 'gpu_layers', 0))
+
+        # Temporarily apply settings and args, then compute VRAM/auto-adjust
+        with temporary_settings(shared.settings, **{k: v for k, v in state.items() if k in shared.settings}):
+            with temporary_attrs(shared.args, loader=loader, ctx_size=ctx_size, cache_type=cache_type):
+                vram_info, adjusted_layers = update_gpu_layers_and_vram(
+                    shared.args.loader,
+                    selected_model,
+                    gpu_layers,
+                    shared.args.ctx_size,
+                    shared.args.cache_type,
+                    auto_adjust=True,
+                    for_ui=True
+                )
+        # Apply hardware heuristic as a secondary suggestion if auto-adjust returns None
+        if adjusted_layers is None:
+            adjusted_layers = suggest_gpu_layers(selected_model, gpu_layers, ctx_size)
+
+        adjusted_str = f"Suggested gpu-layers: {adjusted_layers}" if adjusted_layers is not None else ""
+        return f"### Preflight for `{selected_model}`\n\n{vram_info}\n\n{adjusted_str}"
+    except Exception:
+        exc = traceback.format_exc()
+        logger.error('Preflight failed.')
+        return exc.replace('\n', '\n\n')
+
+
+def apply_preflight_suggestions(selected_model, state):
+    try:
+        if not selected_model or selected_model == 'None':
+            return [gr.update(), gr.update()]
+
+        state = apply_model_settings_to_state(selected_model, state)
+        loader = state.get('loader') or shared.args.loader
+        ctx_size = state.get('ctx_size', shared.args.ctx_size)
+        cache_type = state.get('cache_type', getattr(shared.args, 'cache_type', None))
+        gpu_layers = state.get('gpu_layers', getattr(shared.args, 'gpu_layers', 0))
+
+        with temporary_settings(shared.settings, **{k: v for k, v in state.items() if k in shared.settings}):
+            with temporary_attrs(shared.args, loader=loader, ctx_size=ctx_size, cache_type=cache_type):
+                vram_info, adjusted_layers = update_gpu_layers_and_vram(
+                    shared.args.loader,
+                    selected_model,
+                    gpu_layers,
+                    shared.args.ctx_size,
+                    shared.args.cache_type,
+                    auto_adjust=True,
+                    for_ui=True
+                )
+
+        gpu_layers_update = gr.update(value=adjusted_layers if adjusted_layers is not None else gpu_layers)
+        vram_info_update = gr.update(value=vram_info)
+        return [gpu_layers_update, vram_info_update]
+    except Exception:
+        return [gr.update(), gr.update()]
 
 
 def get_initial_vram_info():

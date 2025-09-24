@@ -51,12 +51,14 @@ from modules import (
     ui_default,
     ui_file_saving,
     ui_model_menu,
+        ui_system,
     ui_notebook,
     ui_parameters,
     ui_session,
     utils
 )
 from modules.chat import generate_pfp_cache
+from modules import config as config_module
 from modules.extensions import apply_extensions
 from modules.LoRA import add_lora_to_model
 from modules.models import load_model, unload_model_if_idle
@@ -165,6 +167,7 @@ def create_interface():
         if not shared.args.portable:
             training.create_ui()  # Training tab
         ui_session.create_ui()  # Session tab
+        ui_system.create_ui()  # System tab
 
         # Generation events
         ui_chat.create_event_handlers()
@@ -175,6 +178,7 @@ def create_interface():
         ui_file_saving.create_event_handlers()
         ui_parameters.create_event_handlers()
         ui_model_menu.create_event_handlers()
+        ui_system.create_event_handlers()
 
         # UI persistence events
         ui.setup_auto_save()
@@ -217,8 +221,58 @@ def create_interface():
         extensions_module.create_extensions_tabs()  # Extensions tabs
         extensions_module.create_extensions_block()  # Extensions block
 
+        # Expose lightweight health/metrics endpoints
+        # Access underlying FastAPI app via .app
+        try:
+            app = shared.gradio['interface'].app
+
+            @app.get('/healthz')
+            def _healthz():
+                return {
+                    'status': 'ok',
+                    'model': shared.model_name,
+                    'loader': shared.args.loader,
+                }
+
+            # Minimal in-memory counters
+            if not hasattr(shared, 'metrics'):
+                shared.metrics = {'requests_total': 0, 'in_flight': 0, 'tokens_total': 0, 'endpoint_counts': {}, 'queue_depth': 0, 't_last': time.time()}
+
+            @app.middleware('http')
+            async def _metrics_mw(request, call_next):
+                try:
+                    shared.metrics['requests_total'] += 1
+                    path = request.url.path
+                    shared.metrics['endpoint_counts'][path] = shared.metrics['endpoint_counts'].get(path, 0) + 1
+                except Exception:
+                    pass
+                response = await call_next(request)
+                return response
+
+            @app.get('/metrics')
+            def _metrics():
+                # Prometheus text format minimal example
+                total = shared.metrics.get('requests_total', 0)
+                inflight = shared.metrics.get('in_flight', 0)
+                tokens = shared.metrics.get('tokens_total', 0)
+                queue_depth = shared.metrics.get('queue_depth', 0)
+                # tokens/sec estimate using last 60s window not persisted; simple snapshot omitted
+                lines = [
+                    f"requests_total {total}",
+                    f"in_flight {inflight}",
+                    f"tokens_total {tokens}",
+                    f"queue_depth {queue_depth}",
+                ]
+                for path, count in shared.metrics.get('endpoint_counts', {}).items():
+                    mname = 'endpoint_requests_total'
+                    lines.append(f'{mname}{{path="{path}"}} {count}')
+                return "\n".join(lines) + "\n"
+        except Exception:
+            pass
+
     # Launch the interface
-    shared.gradio['interface'].queue()
+    # Configure queue limits for backpressure
+    shared.gradio['interface'].queue(concurrency_count=shared.args.threads or 4, max_size=64)
     with OpenMonkeyPatch():
         shared.gradio['interface'].launch(
             max_threads=64,
@@ -250,9 +304,7 @@ if __name__ == "__main__":
 
     if settings_file is not None:
         logger.info(f"Loading settings from \"{settings_file}\"")
-        with open(settings_file, 'r', encoding='utf-8') as f:
-            new_settings = yaml.safe_load(f.read())
-
+        new_settings = config_module.load_and_validate(settings_file)
         if new_settings:
             shared.settings.update(new_settings)
 

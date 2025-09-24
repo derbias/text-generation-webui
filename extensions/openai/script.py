@@ -10,6 +10,8 @@ from threading import Thread
 import uvicorn
 from fastapi import Depends, FastAPI, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.middleware.base import BaseHTTPMiddleware
+import time
 from fastapi.requests import Request
 from fastapi.responses import JSONResponse
 from pydub import AudioSegment
@@ -66,6 +68,9 @@ def verify_api_key(authorization: str = Header(None)) -> None:
     expected_api_key = shared.args.api_key
     if expected_api_key and (authorization is None or authorization != f"Bearer {expected_api_key}"):
         raise HTTPException(status_code=401, detail="Unauthorized")
+    # Require API key if public_api is enabled
+    if shared.args.public_api and not expected_api_key:
+        raise HTTPException(status_code=401, detail="API key required when public_api is enabled")
 
 
 def verify_admin_key(authorization: str = Header(None)) -> None:
@@ -78,14 +83,59 @@ app = FastAPI()
 check_key = [Depends(verify_api_key)]
 check_admin_key = [Depends(verify_admin_key)]
 
-# Configure CORS settings to allow all origins, methods, and headers
+# CORS configuration (restricted by default unless listen/public_api)
+allowed_origins = ["*"]
+if shared.args.cors_origin:
+    try:
+        allowed_origins = [x.strip() for x in shared.args.cors_origin.split(',') if x.strip()]
+    except Exception:
+        pass
+elif not (shared.args.listen or shared.args.public_api):
+    allowed_origins = ["http://127.0.0.1", "http://localhost"]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=allowed_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"]
 )
+
+
+# Simple per-IP rate limiter
+class RateLimitMiddleware(BaseHTTPMiddleware):
+    def __init__(self, app, requests_per_minute: int = 120, window_seconds: int = 60):
+        super().__init__(app)
+        self.capacity = max(1, requests_per_minute)
+        self.window = max(1, window_seconds)
+        self.bucket = {}
+
+    async def dispatch(self, request, call_next):
+        client_ip = request.client.host if request.client else 'unknown'
+        now = int(time.time())
+        bucket = self.bucket.get(client_ip)
+        if not bucket or now - bucket['ts'] >= self.window:
+            bucket = {'ts': now, 'count': 0}
+        bucket['count'] += 1
+        self.bucket[client_ip] = bucket
+        if bucket['count'] > self.capacity:
+            return JSONResponse(status_code=429, content={'detail': 'Too Many Requests'})
+        return await call_next(request)
+
+
+rl_rpm = getattr(shared.args, 'rate_limit_rpm', None)
+rl_win = getattr(shared.args, 'rate_limit_window', None)
+app.add_middleware(
+    RateLimitMiddleware,
+    requests_per_minute=int(rl_rpm) if rl_rpm else 120,
+    window_seconds=int(rl_win) if rl_win else 60
+)
+
+
+@app.exception_handler(Exception)
+async def _unhandled_exception_handler(request: Request, exc: Exception):
+    logger.error(f"OpenAI API unhandled error: {exc}")
+    return JSONResponse(status_code=500, content={"detail": "Internal Server Error"})
 
 
 @app.middleware("http")

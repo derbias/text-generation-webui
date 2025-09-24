@@ -2,6 +2,7 @@ import os
 import re
 from datetime import datetime
 from pathlib import Path
+from contextlib import contextmanager
 
 from modules import shared
 from modules.logging_colors import logger
@@ -241,3 +242,57 @@ def get_available_chat_styles():
 
 def get_available_grammars():
     return ['None'] + sorted([item.name for item in list(Path('user_data/grammars').glob('*.gbnf'))], key=natural_keys)
+
+
+@contextmanager
+def temporary_settings(target: dict, **overrides):
+    """
+    Temporarily override keys in a settings dictionary.
+
+    Usage:
+        from modules import shared
+        with temporary_settings(shared.settings, ctx_size=8192, preset="Throughput"):
+            # code using temporary settings
+            ...
+
+    The original values are restored after the context exits.
+    """
+    sentinel = object()
+    original = {k: target.get(k, sentinel) for k in overrides}
+    try:
+        target.update(overrides)
+        yield target
+    finally:
+        for k, v in original.items():
+            if v is sentinel:
+                # Key did not exist before; remove it
+                target.pop(k, None)
+            else:
+                # Restore previous value
+                target[k] = v
+
+
+@contextmanager
+def temporary_attrs(obj, **overrides):
+    """
+    Temporarily set attributes on an object (e.g., argparse.Namespace).
+
+    Usage:
+        from modules import shared
+        with temporary_attrs(shared.args, loader='llama.cpp', ctx_size=4096):
+            ...
+
+    Attributes are restored (or deleted if newly added) after the context.
+    """
+    sentinel = object()
+    original = {k: getattr(obj, k, sentinel) for k in overrides}
+    try:
+        for k, v in overrides.items():
+            setattr(obj, k, v)
+        yield obj
+    finally:
+        for k, v in original.items():
+            if v is sentinel:
+                delattr(obj, k)
+            else:
+                setattr(obj, k, v)
