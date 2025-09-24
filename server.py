@@ -161,7 +161,13 @@ def create_interface():
             ui_default.create_ui()
             ui_notebook.create_ui()
 
-        ui_parameters.create_ui()  # Parameters tab
+    ui_parameters.create_ui()  # Parameters tab
+        # Model Browser tab (experimental)
+        try:
+            from modules import ui_model_browser
+            ui_model_browser.create_ui()
+        except Exception:
+            pass
         ui_chat.create_character_settings_ui()  # Character tab
         ui_model_menu.create_ui()  # Model tab
         if not shared.args.portable:
@@ -177,6 +183,11 @@ def create_interface():
         # Other events
         ui_file_saving.create_event_handlers()
         ui_parameters.create_event_handlers()
+        try:
+            from modules import ui_model_browser
+            ui_model_browser.create_event_handlers()
+        except Exception:
+            pass
         ui_model_menu.create_event_handlers()
         ui_system.create_event_handlers()
 
