@@ -35,6 +35,9 @@ class LlamaServer:
         self.port = self._find_available_port()
         self.process = None
         self.session = requests.Session()
+        # Default timeouts (connect, read). Read timeout is generous to allow long generations.
+        self._timeout_short = (5, 15)
+        self._timeout_stream = (5, 60)
         self.vocabulary_size = None
         self.bos_token = "<s>"
         self.last_prompt_token_count = 0
@@ -52,7 +55,8 @@ class LlamaServer:
             "add_special": add_bos_token,
         }
 
-        response = self.session.post(url, json=payload)
+        response = self.session.post(url, json=payload, timeout=self._timeout_short)
+        response.raise_for_status()
         result = response.json()
         return result.get("tokens", [])
 
@@ -62,7 +66,8 @@ class LlamaServer:
             "tokens": token_ids,
         }
 
-        response = self.session.post(url, json=payload)
+        response = self.session.post(url, json=payload, timeout=self._timeout_short)
+        response.raise_for_status()
         result = response.json()
         return result.get("content", "")
 
@@ -198,7 +203,7 @@ class LlamaServer:
             print()
 
         # Make the generation request
-        response = self.session.post(url, json=payload, stream=True)
+        response = self.session.post(url, json=payload, stream=True, timeout=self._timeout_stream)
         try:
             response.raise_for_status()  # Raise an exception for HTTP errors
 
@@ -267,7 +272,7 @@ class LlamaServer:
             print()
 
         for retry in range(5):
-            response = self.session.post(url, json=payload)
+            response = self.session.post(url, json=payload, timeout=self._timeout_short)
             result = response.json()
 
             if "completion_probabilities" in result:
@@ -281,7 +286,7 @@ class LlamaServer:
     def _get_vocabulary_size(self):
         """Get and store the model's maximum context length."""
         url = f"http://127.0.0.1:{self.port}/v1/models"
-        response = self.session.get(url).json()
+        response = self.session.get(url, timeout=self._timeout_short).json()
 
         if "data" in response and len(response["data"]) > 0:
             model_info = response["data"][0]
@@ -291,7 +296,7 @@ class LlamaServer:
     def _get_bos_token(self):
         """Get and store the model's BOS token."""
         url = f"http://127.0.0.1:{self.port}/props"
-        response = self.session.get(url).json()
+        response = self.session.get(url, timeout=self._timeout_short).json()
         if "bos_token" in response:
             self.bos_token = response["bos_token"]
 
@@ -425,10 +430,10 @@ class LlamaServer:
                 raise RuntimeError(f"Server process terminated unexpectedly with exit code: {exit_code}")
 
             try:
-                response = self.session.get(health_url)
+                response = self.session.get(health_url, timeout=self._timeout_short)
                 if response.status_code == 200:
                     break
-            except:
+            except Exception:
                 pass
 
             time.sleep(1)

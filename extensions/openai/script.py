@@ -419,14 +419,22 @@ def run_server():
     ssl_certfile = os.environ.get('OPENEDAI_CERT_PATH', shared.args.ssl_certfile)
     ssl_keyfile = os.environ.get('OPENEDAI_KEY_PATH', shared.args.ssl_keyfile)
 
-    # In the server configuration:
-    server_addrs = []
-    if os.environ.get('OPENEDAI_ENABLE_IPV6', shared.args.api_enable_ipv6):
-        server_addrs.append('[::]' if shared.args.listen else '[::1]')
-    if not os.environ.get('OPENEDAI_DISABLE_IPV4', shared.args.api_disable_ipv4):
-        server_addrs.append('0.0.0.0' if shared.args.listen else '127.0.0.1')
+    def _env_flag(name: str, default: bool) -> bool:
+        val = os.environ.get(name)
+        if val is None:
+            return bool(default)
+        return str(val).strip().lower() in {"1", "true", "yes", "y", "on"}
 
-    if not server_addrs:
+    enable_ipv6 = _env_flag('OPENEDAI_ENABLE_IPV6', shared.args.api_enable_ipv6)
+    disable_ipv4 = _env_flag('OPENEDAI_DISABLE_IPV4', shared.args.api_disable_ipv4)
+
+    # Determine bind host
+    if enable_ipv6:
+        bind_host = '::' if shared.args.listen else '::1'
+    else:
+        bind_host = '0.0.0.0' if shared.args.listen else '127.0.0.1'
+
+    if not enable_ipv6 and disable_ipv4:
         raise Exception('you MUST enable IPv6 or IPv4 for the API to work')
 
     # Log server information
@@ -439,11 +447,9 @@ def run_server():
         )
     else:
         url_proto = 'https://' if (ssl_certfile and ssl_keyfile) else 'http://'
-        urls = [f'{url_proto}{addr}:{port}' for addr in server_addrs]
-        if len(urls) > 1:
-            logger.info('OpenAI-compatible API URLs:\n\n' + '\n'.join(urls) + '\n')
-        else:
-            logger.info('OpenAI-compatible API URL:\n\n' + '\n'.join(urls) + '\n')
+        display_host = f'[{bind_host}]' if ':' in bind_host else bind_host
+        url = f'{url_proto}{display_host}:{port}'
+        logger.info('OpenAI-compatible API URL:\n\n' + url + '\n')
 
     # Log API keys
     if shared.args.api_key:
@@ -457,7 +463,7 @@ def run_server():
 
     # Start server
     logging.getLogger("uvicorn.error").propagate = False
-    uvicorn.run(app, host=server_addrs, port=port, ssl_certfile=ssl_certfile, ssl_keyfile=ssl_keyfile, access_log=False)
+    uvicorn.run(app, host=bind_host, port=port, ssl_certfile=ssl_certfile, ssl_keyfile=ssl_keyfile, access_log=False)
 
 
 def setup():
