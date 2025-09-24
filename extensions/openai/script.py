@@ -339,6 +339,43 @@ async def handle_health_check():
     return JSONResponse(content={"status": "ok"})
 
 
+@app.get("/v1/internal/api-keys", dependencies=check_key)
+async def handle_api_keys_info():
+    """
+    Returns whether API/Admin keys are configured. Does not reveal or store keys.
+    """
+    has_api_key = bool(getattr(shared.args, 'api_key', '') or os.environ.get('OPENEDAI_API_KEY', ''))
+    has_admin_key = bool(getattr(shared.args, 'admin_key', '') or os.environ.get('OPENEDAI_ADMIN_KEY', ''))
+    payload = {
+        "configured": {
+            "api_key": has_api_key,
+            "admin_key": has_admin_key
+        }
+    }
+    return JSONResponse(content=payload)
+
+
+@app.post("/v1/internal/api-keys/validate", dependencies=check_key)
+async def handle_api_keys_validate(request: Request):
+    """
+    Validates a provided key against the current runtime config. Does not store.
+    Body: {"type": "api"|"admin", "key": "..."}
+    """
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid JSON body")
+
+    key_type = (body.get('type') or 'api').strip().lower()
+    key_value = body.get('key') or ''
+    if key_type not in ('api', 'admin'):
+        raise HTTPException(status_code=400, detail="type must be 'api' or 'admin'")
+
+    expected = getattr(shared.args, 'api_key' if key_type == 'api' else 'admin_key', '')
+    valid = bool(expected) and (key_value == expected)
+    return JSONResponse(content={"valid": valid})
+
+
 @app.post("/v1/internal/encode", response_model=EncodeResponse, dependencies=check_key)
 async def handle_token_encode(request_data: EncodeRequest):
     response = token_encode(request_data.text)
