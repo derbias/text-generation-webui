@@ -23,7 +23,6 @@ except ImportError:
     BaseHTTPMiddleware = None
 from fastapi.requests import Request
 from fastapi.responses import JSONResponse
-from pydub import AudioSegment
 from sse_starlette import EventSourceResponse
 from starlette.concurrency import iterate_in_threadpool
 
@@ -94,7 +93,7 @@ check_admin_key = [Depends(verify_admin_key)]
 
 # CORS configuration (restricted by default unless listen/public_api)
 allowed_origins = ["*"]
-if shared.args.cors_origin:
+if getattr(shared.args, 'cors_origin', None):
     try:
         allowed_origins = [x.strip() for x in shared.args.cors_origin.split(',') if x.strip()]
     except Exception:
@@ -258,6 +257,10 @@ def handle_billing_usage():
 @app.post('/v1/audio/transcriptions', dependencies=check_key)
 async def handle_audio_transcription(request: Request):
     import speech_recognition as sr
+    try:
+        from pydub import AudioSegment
+    except Exception:
+        raise HTTPException(status_code=503, detail="Audio transcription requires pydub/ffmpeg")
 
     r = sr.Recognizer()
 
