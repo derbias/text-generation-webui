@@ -303,6 +303,8 @@ def do_cmd_flags_warnings():
             logger.warning("\nYou are potentially exposing the web UI to the entire internet without any access password.\nYou can create one with the \"--gradio-auth\" flag like this:\n\n--gradio-auth username:password\n\nMake sure to replace username:password with your own.")
             if args.multi_user:
                 logger.warning('\nThe multi-user mode is highly experimental and should not be shared publicly.')
+        if args.public_api and not getattr(args, 'api_key', None):
+            logger.warning('\n--public-api is enabled without --api-key. Requests will be rejected. Set --api-key to allow access.')
 
 
 def fix_loader_name(name):

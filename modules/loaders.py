@@ -1,3 +1,16 @@
+# Base loader protocol (scaffold)
+class BaseLoader:
+    def load(self, model_name: str):
+        raise NotImplementedError
+
+    def unload(self):
+        raise NotImplementedError
+
+    def generate(self, prompt, state):
+        raise NotImplementedError
+
+    def tokenize(self, text: str):
+        raise NotImplementedError
 import functools
 from collections import OrderedDict
 
