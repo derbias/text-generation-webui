@@ -6,12 +6,21 @@ import socket
 import traceback
 from collections import deque
 from threading import Thread
-
-import uvicorn
-from fastapi import Depends, FastAPI, Header, HTTPException
-from fastapi.middleware.cors import CORSMiddleware
-from starlette.middleware.base import BaseHTTPMiddleware
 import time
+
+try:
+    import uvicorn
+    from fastapi import Depends, FastAPI, Header, HTTPException
+    from fastapi.middleware.cors import CORSMiddleware
+    from starlette.middleware.base import BaseHTTPMiddleware
+except ImportError:
+    uvicorn = None
+    FastAPI = None
+    Depends = None
+    Header = None
+    HTTPException = None
+    CORSMiddleware = None
+    BaseHTTPMiddleware = None
 from fastapi.requests import Request
 from fastapi.responses import JSONResponse
 from pydub import AudioSegment
@@ -469,14 +478,23 @@ def run_server():
     ssl_certfile = os.environ.get('OPENEDAI_CERT_PATH', shared.args.ssl_certfile)
     ssl_keyfile = os.environ.get('OPENEDAI_KEY_PATH', shared.args.ssl_keyfile)
 
-    # In the server configuration:
-    server_addrs = []
-    if os.environ.get('OPENEDAI_ENABLE_IPV6', shared.args.api_enable_ipv6):
-        server_addrs.append('[::]' if shared.args.listen else '[::1]')
-    if not os.environ.get('OPENEDAI_DISABLE_IPV4', shared.args.api_disable_ipv4):
-        server_addrs.append('0.0.0.0' if shared.args.listen else '127.0.0.1')
+    # Determine bind host (single value for uvicorn) and advertised addresses
+    use_ipv6 = bool(os.environ.get('OPENEDAI_ENABLE_IPV6', shared.args.api_enable_ipv6))
+    disable_ipv4 = bool(os.environ.get('OPENEDAI_DISABLE_IPV4', shared.args.api_disable_ipv4))
+    listen = bool(shared.args.listen)
 
-    if not server_addrs:
+    bind_host = None
+    advertised_addrs = []
+
+    if use_ipv6:
+        bind_host = '[::]' if listen else '::1'
+        advertised_addrs.append('[::]' if listen else '[::1]')
+    if not disable_ipv4:
+        if bind_host is None:
+            bind_host = '0.0.0.0' if listen else '127.0.0.1'
+        advertised_addrs.append('0.0.0.0' if listen else '127.0.0.1')
+
+    if bind_host is None:
         raise Exception('you MUST enable IPv6 or IPv4 for the API to work')
 
     # Log server information
@@ -489,7 +507,7 @@ def run_server():
         )
     else:
         url_proto = 'https://' if (ssl_certfile and ssl_keyfile) else 'http://'
-        urls = [f'{url_proto}{addr}:{port}' for addr in server_addrs]
+        urls = [f'{url_proto}{addr}:{port}' for addr in advertised_addrs]
         if len(urls) > 1:
             logger.info('OpenAI-compatible API URLs:\n\n' + '\n'.join(urls) + '\n')
         else:
@@ -505,9 +523,9 @@ def run_server():
     if shared.args.admin_key and shared.args.admin_key != shared.args.api_key:
         logger.info(f'OpenAI API admin key (for loading/unloading models):\n\n{shared.args.admin_key}\n')
 
-    # Start server
+    # Start server (single host string)
     logging.getLogger("uvicorn.error").propagate = False
-    uvicorn.run(app, host=server_addrs, port=port, ssl_certfile=ssl_certfile, ssl_keyfile=ssl_keyfile, access_log=False)
+    uvicorn.run(app, host=bind_host, port=port, ssl_certfile=ssl_certfile, ssl_keyfile=ssl_keyfile, access_log=False)
 
 
 def setup():
