@@ -2,7 +2,7 @@ import json
 import time
 from typing import Dict, List, Optional
 
-from pydantic import BaseModel, Field, model_validator, validator
+from pydantic import BaseModel, Field, model_validator
 
 
 class GenerationOptions(BaseModel):
@@ -83,11 +83,11 @@ class FunctionCall(BaseModel):
     arguments: Optional[str] = None
     parameters: Optional[str] = None
 
-    @validator('arguments', allow_reuse=True)
-    def checkPropertyArgsOrParams(cls, v, values, **kwargs):
-        if not v and not values.get('parameters'):
+    @model_validator(mode='after')
+    def checkPropertyArgsOrParams(self):
+        if not self.arguments and not self.parameters:
             raise ValueError("At least one of 'arguments' or 'parameters' must be provided as property in FunctionCall type")
-        return v
+        return self
 
 
 class ToolCall(BaseModel):
