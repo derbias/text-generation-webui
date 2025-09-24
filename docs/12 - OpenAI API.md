@@ -40,6 +40,12 @@ Add `--api` to your command-line flags.
 * To use SSL, add `--ssl-keyfile key.pem --ssl-certfile cert.pem`. ⚠️ **Note**: this doesn't work with `--public-api` since Cloudflare already uses HTTPS by default.
 * To use an API key for authentication, add `--api-key yourkey`.
 
+Recommended API-only startup:
+
+```bash
+./start_linux.sh --nowebui --api --extensions openai --api-port 5000
+```
+
 ### Examples
 
 For the documentation with all the endpoints, parameters and their types, consult `http://127.0.0.1:5000/docs` or the [typing.py](https://github.com/oobabooga/text-generation-webui/blob/main/extensions/openai/typing.py) file.
@@ -524,6 +530,10 @@ In short, the all-MiniLM-L6-v2 model is 5x faster, 5x smaller ram, 2x smaller st
 
 Warning: You cannot mix embeddings from different models even if they have the same dimensions. They are not comparable.
 
+### Audio transcription (pydub/ffmpeg)
+
+The `/v1/audio/transcriptions` endpoint requires `pydub` and a working `ffmpeg` binary in your PATH. If these are missing, the endpoint returns `503` with a clear message and the rest of the API continues to work.
+
 ### Compatibility & not so compatibility
 
 Note: the table below may be obsolete.
@@ -571,3 +581,56 @@ Note: the table below may be obsolete.
 | ✅❌          | Auto-GPT               | https://github.com/Significant-Gravitas/Auto-GPT                               | OPENAI_API_BASE=http://127.0.0.1:5001/v1 Same issues as langchain. Also assumes a 4k+ context                                                                                                                |
 | ✅❌          | babyagi                | https://github.com/yoheinakajima/babyagi                                       | OPENAI_API_BASE=http://127.0.0.1:5001/v1                                                                                                                                                                     |
 | ❌            | guidance               | https://github.com/microsoft/guidance                                          | logit_bias and logprobs not yet supported                                                                                                                                                                    |
+
+### Health and API keys (internal)
+
+- Health check:
+
+```shell
+curl http://127.0.0.1:5000/v1/internal/health
+```
+
+Returns:
+
+```json
+{"status":"ok"}
+```
+
+- API keys status (non-persistent):
+
+```shell
+curl http://127.0.0.1:5000/v1/internal/api-keys
+```
+
+Example response:
+
+```json
+{
+  "configured": {"api_key": true, "admin_key": false},
+  "masked": {"api_key": "************abcd", "admin_key": ""}
+}
+```
+
+- Validate a key without storing it:
+
+```shell
+curl -X POST http://127.0.0.1:5000/v1/internal/api-keys/validate \
+  -H "Content-Type: application/json" \
+  -d '{"type":"api","key":"sk-..."}'
+```
+
+Returns:
+
+```json
+{"valid": true}
+```
+
+Notes:
+- The server does not store keys via these endpoints.
+- Validation checks against runtime args or env vars (`OPENEDAI_API_KEY`, `OPENEDAI_ADMIN_KEY`).
+
+### Recommended startup (API only)
+
+```bash
+./start_linux.sh --nowebui --api --extensions openai --api-port 5000
+```

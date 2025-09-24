@@ -59,9 +59,20 @@ def _load_model(data):
             if k in shared.settings:
                 shared.settings[k] = settings[k]
                 if k == 'truncation_length':
-                    logger.info(f"TRUNCATION LENGTH (UPDATED): {shared.settings['truncation_length']}")
+                    logger.info(
+                        "TRUNCATION LENGTH (UPDATED): %s",
+                        shared.settings['truncation_length']
+                    )
                 elif k == 'instruction_template':
-                    logger.info(f"INSTRUCTION TEMPLATE (UPDATED): {shared.settings['instruction_template']}")
+                    logger.info(
+                        "INSTRUCTION TEMPLATE (UPDATED): %s",
+                        shared.settings['instruction_template']
+                    )
+
+
+def load_model_public(data: dict):
+    """Public wrapper for model loading (wraps internal _load_model)."""
+    return _load_model(data)
 
 
 def list_loras():

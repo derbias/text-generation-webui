@@ -34,7 +34,7 @@ from modules.logging_colors import logger
 from modules.models import unload_model
 from modules.text_generation import stop_everything_event
 
-from .typing import (
+from extensions.openai.typing import (
     ChatCompletionRequest,
     ChatCompletionResponse,
     ChatPromptResponse,
@@ -70,16 +70,25 @@ streaming_semaphore = asyncio.Semaphore(1)
 
 def verify_api_key(authorization: str = Header(None)) -> None:
     expected_api_key = shared.args.api_key
-    if expected_api_key and (authorization is None or authorization != f"Bearer {expected_api_key}"):
+    bearer = None if expected_api_key is None else f"Bearer {expected_api_key}"
+    if expected_api_key and (
+        authorization is None or authorization != bearer
+    ):
         raise HTTPException(status_code=401, detail="Unauthorized")
     # Require API key if public_api is enabled
     if shared.args.public_api and not expected_api_key:
-        raise HTTPException(status_code=401, detail="API key required when public_api is enabled")
+        raise HTTPException(
+            status_code=401,
+            detail="API key required when public_api is enabled"
+        )
 
 
 def verify_admin_key(authorization: str = Header(None)) -> None:
     expected_api_key = shared.args.admin_key
-    if expected_api_key and (authorization is None or authorization != f"Bearer {expected_api_key}"):
+    bearer = None if expected_api_key is None else f"Bearer {expected_api_key}"
+    if expected_api_key and (
+        authorization is None or authorization != bearer
+    ):
         raise HTTPException(status_code=401, detail="Unauthorized")
 
 
@@ -91,11 +100,18 @@ check_admin_key = [Depends(verify_admin_key)]
 allowed_origins = ["*"]
 if getattr(shared.args, 'cors_origin', None):
     try:
-        allowed_origins = [x.strip() for x in shared.args.cors_origin.split(',') if x.strip()]
-    except Exception:
+        allowed_origins = [
+            x.strip()
+            for x in shared.args.cors_origin.split(',')
+            if x.strip()
+        ]
+    except (AttributeError, TypeError, ValueError):
         pass
 elif not (shared.args.listen or shared.args.public_api):
-    allowed_origins = ["http://127.0.0.1", "http://localhost"]
+    allowed_origins = [
+        "http://127.0.0.1",
+        "http://localhost"
+    ]
 
 app.add_middleware(
     CORSMiddleware,
@@ -108,8 +124,13 @@ app.add_middleware(
 
 # Simple per-IP rate limiter
 class RateLimitMiddleware(BaseHTTPMiddleware):
-    def __init__(self, app, requests_per_minute: int = 120, window_seconds: int = 60):
-        super().__init__(app)
+    def __init__(
+        self,
+        asgi_app,
+        requests_per_minute: int = 120,
+        window_seconds: int = 60
+    ):
+        super().__init__(asgi_app)
         self.capacity = max(1, requests_per_minute)
         self.window = max(1, window_seconds)
         self.bucket = {}
@@ -123,7 +144,10 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         bucket['count'] += 1
         self.bucket[client_ip] = bucket
         if bucket['count'] > self.capacity:
-            return JSONResponse(status_code=429, content={'detail': 'Too Many Requests'})
+            return JSONResponse(
+                status_code=429,
+                content={'detail': 'Too Many Requests'}
+            )
         return await call_next(request)
 
 
@@ -137,13 +161,19 @@ app.add_middleware(
 
 
 @app.exception_handler(Exception)
-async def _unhandled_exception_handler(request: Request, exc: Exception):
-    logger.error(f"OpenAI API unhandled error: {exc}")
-    return JSONResponse(status_code=500, content={"detail": "Internal Server Error"})
+async def _unhandled_exception_handler(  # noqa: ARG001
+    request: Request,
+    exc: Exception
+):
+    logger.error("OpenAI API unhandled error: %s", exc)
+    return JSONResponse(
+        status_code=500,
+        content={"detail": "Internal Server Error"}
+    )
 
 
 @app.middleware("http")
-async def validate_host_header(request: Request, call_next):
+async def validate_host_header(request: Request, call_next):  # noqa: ARG001
     # Be strict about only approving access to localhost by default
     if not (shared.args.listen or shared.args.public_api):
         host = request.headers.get("host", "").split(":")[0]
@@ -161,8 +191,15 @@ async def options_route():
     return JSONResponse(content="OK")
 
 
-@app.post('/v1/completions', response_model=CompletionResponse, dependencies=check_key)
-async def openai_completions(request: Request, request_data: CompletionRequest):
+@app.post(
+    '/v1/completions',
+    response_model=CompletionResponse,
+    dependencies=check_key
+)
+async def openai_completions(
+    request: Request,  # noqa: ARG001
+    request_data: CompletionRequest
+):
     import extensions.openai.completions as OAIcompletions
     path = request.url.path
     is_legacy = "/generate" in path
@@ -171,7 +208,10 @@ async def openai_completions(request: Request, request_data: CompletionRequest):
         async def generator():
             async with streaming_semaphore:
                 try:
-                    response = OAIcompletions.stream_completions(to_dict(request_data), is_legacy=is_legacy)
+                    response = OAIcompletions.stream_completions(
+                        to_dict(request_data),
+                        is_legacy=is_legacy
+                    )
                     async for resp in iterate_in_threadpool(response):
                         disconnected = await request.is_disconnected()
                         if disconnected:
@@ -181,7 +221,6 @@ async def openai_completions(request: Request, request_data: CompletionRequest):
                 finally:
                     stop_everything_event()
                     response.close()
-                    return
 
         return EventSourceResponse(generator())  # SSE streaming
 
@@ -195,8 +234,15 @@ async def openai_completions(request: Request, request_data: CompletionRequest):
         return JSONResponse(response)
 
 
-@app.post('/v1/chat/completions', response_model=ChatCompletionResponse, dependencies=check_key)
-async def openai_chat_completions(request: Request, request_data: ChatCompletionRequest):
+@app.post(
+    '/v1/chat/completions',
+    response_model=ChatCompletionResponse,
+    dependencies=check_key
+)
+async def openai_chat_completions(
+    request: Request,  # noqa: ARG001
+    request_data: ChatCompletionRequest
+):
     import extensions.openai.completions as OAIcompletions
     path = request.url.path
     is_legacy = "/generate" in path
@@ -205,7 +251,10 @@ async def openai_chat_completions(request: Request, request_data: ChatCompletion
         async def generator():
             async with streaming_semaphore:
                 try:
-                    response = OAIcompletions.stream_chat_completions(to_dict(request_data), is_legacy=is_legacy)
+                    response = OAIcompletions.stream_chat_completions(
+                        to_dict(request_data),
+                        is_legacy=is_legacy
+                    )
                     async for resp in iterate_in_threadpool(response):
                         disconnected = await request.is_disconnected()
                         if disconnected:
@@ -215,7 +264,6 @@ async def openai_chat_completions(request: Request, request_data: ChatCompletion
                 finally:
                     stop_everything_event()
                     response.close()
-                    return
 
         return EventSourceResponse(generator())  # SSE streaming
 
@@ -258,8 +306,11 @@ async def handle_audio_transcription(request: Request):
     import speech_recognition as sr
     try:
         from pydub import AudioSegment
-    except Exception:
-        raise HTTPException(status_code=503, detail="Audio transcription requires pydub/ffmpeg")
+    except Exception as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="Audio transcription requires pydub/ffmpeg"
+        ) from exc
 
     r = sr.Recognizer()
 
@@ -271,20 +322,33 @@ async def handle_audio_transcription(request: Request):
     raw_data = audio_data.raw_data
 
     # Create AudioData object
-    audio_data = sr.AudioData(raw_data, audio_data.frame_rate, audio_data.sample_width)
+    audio_data = sr.AudioData(
+        raw_data,
+        audio_data.frame_rate,
+        audio_data.sample_width
+    )
     whisper_language = form.getvalue('language', None)
-    whisper_model = form.getvalue('model', 'tiny')  # Use the model from the form data if it exists, otherwise default to tiny
+    # Use the model from the form data if it exists, otherwise default to tiny
+    whisper_model = form.getvalue('model', 'tiny')
 
     transcription = {"text": ""}
 
     try:
-        transcription["text"] = r.recognize_whisper(audio_data, language=whisper_language, model=whisper_model)
+        transcription["text"] = r.recognize_whisper(
+            audio_data,
+            language=whisper_language,
+            model=whisper_model
+        )
     except sr.UnknownValueError:
         print("Whisper could not understand audio")
-        transcription["text"] = "Whisper could not understand audio UnknownValueError"
+        transcription["text"] = (
+            "Whisper could not understand audio UnknownValueError"
+        )
     except sr.RequestError as e:
         print("Could not request results from Whisper", e)
-        transcription["text"] = "Whisper could not understand audio RequestError"
+        transcription["text"] = (
+            "Whisper could not understand audio RequestError"
+        )
 
     return JSONResponse(content=transcription)
 
@@ -294,7 +358,9 @@ async def handle_image_generation(request: Request):
     import extensions.openai.images as OAIimages
 
     if not os.environ.get('SD_WEBUI_URL', params.get('sd_webui_url', '')):
-        raise ServiceUnavailableError("Stable Diffusion not available. SD_WEBUI_URL not set.")
+        raise ServiceUnavailableError(
+            "Stable Diffusion not available. SD_WEBUI_URL not set."
+        )
 
     body = await request.json()
     prompt = body['prompt']
@@ -302,35 +368,59 @@ async def handle_image_generation(request: Request):
     response_format = body.get('response_format', 'url')  # or b64_json
     n = body.get('n', 1)  # ignore the batch limits of max 10
 
-    response = await OAIimages.generations(prompt=prompt, size=size, response_format=response_format, n=n)
+    response = await OAIimages.generations(
+        prompt=prompt,
+        size=size,
+        response_format=response_format,
+        n=n
+    )
     return JSONResponse(response)
 
 
-@app.post("/v1/embeddings", response_model=EmbeddingsResponse, dependencies=check_key)
-async def handle_embeddings(request: Request, request_data: EmbeddingsRequest):
+@app.post(
+    "/v1/embeddings",
+    response_model=EmbeddingsResponse,
+    dependencies=check_key
+)
+async def handle_embeddings(  # noqa: ARG001
+    request: Request,
+    request_data: EmbeddingsRequest
+):
     import extensions.openai.embeddings as OAIembeddings
 
-    input = request_data.input
-    if not input:
-        raise HTTPException(status_code=400, detail="Missing required argument input")
+    input_value = request_data.input
+    if not input_value:
+        raise HTTPException(
+            status_code=400,
+            detail="Missing required argument input"
+        )
 
-    if type(input) is str:
-        input = [input]
+    if type(input_value) is str:
+        input_value = [input_value]
 
-    response = OAIembeddings.embeddings(input, request_data.encoding_format)
+    response = OAIembeddings.embeddings(
+        input_value,
+        request_data.encoding_format
+    )
     return JSONResponse(response)
 
 
-@app.post("/v1/moderations", dependencies=check_key)
-async def handle_moderations(request: Request):
+@app.post(
+    "/v1/moderations",
+    dependencies=check_key
+)
+async def handle_moderations(request: Request):  # noqa: ARG001
     import extensions.openai.moderations as OAImoderations
 
     body = await request.json()
-    input = body["input"]
-    if not input:
-        raise HTTPException(status_code=400, detail="Missing required argument input")
+    input_value = body["input"]
+    if not input_value:
+        raise HTTPException(
+            status_code=400,
+            detail="Missing required argument input"
+        )
 
-    response = OAImoderations.moderations(input)
+    response = OAImoderations.moderations(input_value)
     return JSONResponse(response)
 
 
@@ -342,7 +432,8 @@ async def handle_health_check():
 @app.get("/v1/internal/api-keys", dependencies=check_key)
 async def handle_api_keys_info():
     """
-    Returns whether API/Admin keys are configured. Does not reveal or store keys.
+    Returns whether API/Admin keys are configured.
+    Does not reveal or store keys.
     """
     def _mask(value: str):
         if not value:
@@ -352,8 +443,14 @@ async def handle_api_keys_info():
             return '*' * n
         return ('*' * (n - 4)) + value[-4:]
 
-    api_key_val = getattr(shared.args, 'api_key', '') or os.environ.get('OPENEDAI_API_KEY', '')
-    admin_key_val = getattr(shared.args, 'admin_key', '') or os.environ.get('OPENEDAI_ADMIN_KEY', '')
+    api_key_val = (
+        getattr(shared.args, 'api_key', '') or
+        os.environ.get('OPENEDAI_API_KEY', '')
+    )
+    admin_key_val = (
+        getattr(shared.args, 'admin_key', '') or
+        os.environ.get('OPENEDAI_ADMIN_KEY', '')
+    )
     has_api_key = bool(api_key_val)
     has_admin_key = bool(admin_key_val)
     payload = {
@@ -372,145 +469,196 @@ async def handle_api_keys_info():
 @app.post("/v1/internal/api-keys/validate", dependencies=check_key)
 async def handle_api_keys_validate(request: Request):
     """
-    Validates a provided key against the current runtime config. Does not store.
+    Validates a provided key against the current runtime config.
+    Does not store.
     Body: {"type": "api"|"admin", "key": "..."}
     """
     try:
         body = await request.json()
-    except Exception:
-        raise HTTPException(status_code=400, detail="Invalid JSON body")
+    except Exception as exc:
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid JSON body"
+        ) from exc
 
     key_type = (body.get('type') or 'api').strip().lower()
     key_value = body.get('key') or ''
     if key_type not in ('api', 'admin'):
-        raise HTTPException(status_code=400, detail="type must be 'api' or 'admin'")
+        raise HTTPException(
+            status_code=400,
+            detail="type must be 'api' or 'admin'"
+        )
 
-    expected = getattr(shared.args, 'api_key' if key_type == 'api' else 'admin_key', '') or os.environ.get('OPENEDAI_API_KEY' if key_type == 'api' else 'OPENEDAI_ADMIN_KEY', '')
+    expected_from_args = getattr(
+        shared.args,
+        'api_key' if key_type == 'api' else 'admin_key',
+        ''
+    )
+    expected_from_env = os.environ.get(
+        'OPENEDAI_API_KEY' if key_type == 'api' else 'OPENEDAI_ADMIN_KEY',
+        ''
+    )
+    expected = expected_from_args or expected_from_env
     valid = bool(expected) and (key_value == expected)
     return JSONResponse(content={"valid": valid})
 
 
-@app.post("/v1/internal/encode", response_model=EncodeResponse, dependencies=check_key)
+@app.post(
+    "/v1/internal/encode",
+    response_model=EncodeResponse,
+    dependencies=check_key
+)
 async def handle_token_encode(request_data: EncodeRequest):
     response = token_encode(request_data.text)
     return JSONResponse(response)
 
 
-@app.post("/v1/internal/decode", response_model=DecodeResponse, dependencies=check_key)
+@app.post(
+    "/v1/internal/decode",
+    response_model=DecodeResponse,
+    dependencies=check_key
+)
 async def handle_token_decode(request_data: DecodeRequest):
     response = token_decode(request_data.tokens)
     return JSONResponse(response)
 
 
-@app.post("/v1/internal/token-count", response_model=TokenCountResponse, dependencies=check_key)
+@app.post(
+    "/v1/internal/token-count",
+    response_model=TokenCountResponse,
+    dependencies=check_key
+)
 async def handle_token_count(request_data: EncodeRequest):
     response = token_count(request_data.text)
     return JSONResponse(response)
 
 
-@app.post("/v1/internal/logits", response_model=LogitsResponse, dependencies=check_key)
+@app.post(
+    "/v1/internal/logits",
+    response_model=LogitsResponse,
+    dependencies=check_key
+)
 async def handle_logits(request_data: LogitsRequest):
     import extensions.openai.logits as OAIlogits
-    '''
-    Given a prompt, returns the top 50 most likely logits as a dict.
-    The keys are the tokens, and the values are the probabilities.
-    '''
-    response = OAIlogits._get_next_logits(to_dict(request_data))
+    # Given a prompt, returns the top 50 most likely logits as a dict.
+    # The keys are the tokens, and the values are the probabilities.
+    response = OAIlogits.get_next_logits_public(to_dict(request_data))
     return JSONResponse(response)
 
 
-@app.post('/v1/internal/chat-prompt', response_model=ChatPromptResponse, dependencies=check_key)
-async def handle_chat_prompt(request: Request, request_data: ChatCompletionRequest):
+@app.post(
+    '/v1/internal/chat-prompt',
+    response_model=ChatPromptResponse,
+    dependencies=check_key
+)
+async def handle_chat_prompt(
+    request: Request,  # noqa: ARG001
+    request_data: ChatCompletionRequest
+):
     import extensions.openai.completions as OAIcompletions
     path = request.url.path
     is_legacy = "/generate" in path
-    generator = OAIcompletions.chat_completions_common(to_dict(request_data), is_legacy=is_legacy, prompt_only=True)
+    generator = OAIcompletions.chat_completions_common(
+        to_dict(request_data),
+        is_legacy=is_legacy,
+        prompt_only=True
+    )
     response = deque(generator, maxlen=1).pop()
     return JSONResponse(response)
 
 
 @app.post("/v1/internal/stop-generation", dependencies=check_key)
-async def handle_stop_generation(request: Request):
+async def handle_stop_generation(request: Request):  # noqa: ARG001
     stop_everything_event()
     return JSONResponse(content="OK")
 
 
-@app.get("/v1/internal/model/info", response_model=ModelInfoResponse, dependencies=check_key)
+@app.get(
+    "/v1/internal/model/info",
+    response_model=ModelInfoResponse,
+    dependencies=check_key
+)
 async def handle_model_info():
     import extensions.openai.models as OAImodels
     payload = OAImodels.get_current_model_info()
     return JSONResponse(content=payload)
 
 
-@app.get("/v1/internal/model/list", response_model=ModelListResponse, dependencies=check_admin_key)
-async def handle_list_models():
+@app.get(
+    "/v1/internal/model/list",
+    response_model=ModelListResponse,
+    dependencies=check_admin_key
+)
+async def handle_list_models():  # noqa: ARG001
     import extensions.openai.models as OAImodels
     payload = OAImodels.list_models()
     return JSONResponse(content=payload)
 
 
-@app.post("/v1/internal/model/load", dependencies=check_admin_key)
+@app.post(
+    "/v1/internal/model/load",
+    dependencies=check_admin_key
+)
 async def handle_load_model(request_data: LoadModelRequest):
     import extensions.openai.models as OAImodels
-    '''
-    This endpoint is experimental and may change in the future.
-
-    The "args" parameter can be used to modify flags like "--load-in-4bit"
-    or "--n-gpu-layers" before loading a model. Example:
-
-    ```
-    "args": {
-      "load_in_4bit": true,
-      "n_gpu_layers": 12
-    }
-    ```
-
-    Note that those settings will remain after loading the model. So you
-    may need to change them back to load a second model.
-
-    The "settings" parameter is also a dict but with keys for the
-    shared.settings object. It can be used to modify the default instruction
-    template like this:
-
-    ```
-    "settings": {
-      "instruction_template": "Alpaca"
-    }
-    ```
-    '''
+    # Experimental endpoint; interface may change.
+    #
+    # The "args" parameter can be used to modify flags such as
+    # "--load-in-4bit" or "--n-gpu-layers" before loading a model.
+    # Those settings remain after loading and may need to be changed for
+    # subsequent loads.
+    #
+    # The "settings" parameter applies to shared.settings keys (e.g.
+    # instruction_template).
 
     try:
-        OAImodels._load_model(to_dict(request_data))
+        OAImodels.load_model_public(to_dict(request_data))
         return JSONResponse(content="OK")
-    except:
+    except (ValueError, OSError, RuntimeError, KeyError) as exc:
         traceback.print_exc()
-        return HTTPException(status_code=400, detail="Failed to load the model.")
+        return HTTPException(
+            status_code=400,
+            detail=f"Failed to load the model: {exc}"
+        )
 
 
 @app.post("/v1/internal/model/unload", dependencies=check_admin_key)
-async def handle_unload_model():
+async def handle_unload_model():  # noqa: ARG001
     unload_model()
 
 
-@app.get("/v1/internal/lora/list", response_model=LoraListResponse, dependencies=check_admin_key)
+@app.get(
+    "/v1/internal/lora/list",
+    response_model=LoraListResponse,
+    dependencies=check_admin_key
+)
 async def handle_list_loras():
     import extensions.openai.models as OAImodels
     response = OAImodels.list_loras()
     return JSONResponse(content=response)
 
 
-@app.post("/v1/internal/lora/load", dependencies=check_admin_key)
+@app.post(
+    "/v1/internal/lora/load",
+    dependencies=check_admin_key
+)
 async def handle_load_loras(request_data: LoadLorasRequest):
     import extensions.openai.models as OAImodels
     try:
         OAImodels.load_loras(request_data.lora_names)
         return JSONResponse(content="OK")
-    except:
+    except (ValueError, OSError, RuntimeError, KeyError) as exc:
         traceback.print_exc()
-        return HTTPException(status_code=400, detail="Failed to apply the LoRA(s).")
+        return HTTPException(
+            status_code=400,
+            detail=f"Failed to apply the LoRA(s): {exc}"
+        )
 
 
-@app.post("/v1/internal/lora/unload", dependencies=check_admin_key)
+@app.post(
+    "/v1/internal/lora/unload",
+    dependencies=check_admin_key
+)
 async def handle_unload_loras():
     import extensions.openai.models as OAImodels
     OAImodels.unload_all_loras()
@@ -529,7 +677,11 @@ def find_available_port(starting_port):
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
             s.bind(('', 0))  # Bind to port 0 to get an available port
             new_port = s.getsockname()[1]
-            logger.warning(f"Port {starting_port} is already in use. Using port {new_port} instead.")
+            logger.warning(
+                "Port %s is already in use. Using port %s instead.",
+                starting_port,
+                new_port
+            )
             return new_port
 
 
@@ -537,12 +689,22 @@ def run_server():
     # Parse configuration
     port = int(os.environ.get('OPENEDAI_PORT', shared.args.api_port))
     port = find_available_port(port)
-    ssl_certfile = os.environ.get('OPENEDAI_CERT_PATH', shared.args.ssl_certfile)
-    ssl_keyfile = os.environ.get('OPENEDAI_KEY_PATH', shared.args.ssl_keyfile)
+    ssl_certfile = os.environ.get(
+        'OPENEDAI_CERT_PATH',
+        shared.args.ssl_certfile
+    )
+    ssl_keyfile = os.environ.get(
+        'OPENEDAI_KEY_PATH',
+        shared.args.ssl_keyfile
+    )
 
     # Determine bind host (single value for uvicorn) and advertised addresses
-    use_ipv6 = bool(os.environ.get('OPENEDAI_ENABLE_IPV6', shared.args.api_enable_ipv6))
-    disable_ipv4 = bool(os.environ.get('OPENEDAI_DISABLE_IPV4', shared.args.api_disable_ipv4))
+    use_ipv6 = bool(
+        os.environ.get('OPENEDAI_ENABLE_IPV6', shared.args.api_enable_ipv6)
+    )
+    disable_ipv4 = bool(
+        os.environ.get('OPENEDAI_DISABLE_IPV4', shared.args.api_disable_ipv4)
+    )
     listen = bool(shared.args.listen)
 
     bind_host = None
@@ -557,7 +719,9 @@ def run_server():
         advertised_addrs.append('0.0.0.0' if listen else '127.0.0.1')
 
     if bind_host is None:
-        raise Exception('you MUST enable IPv6 or IPv4 for the API to work')
+        raise RuntimeError(
+            'you MUST enable IPv6 or IPv4 for the API to work'
+        )
 
     # Log server information
     if shared.args.public_api:
@@ -565,29 +729,47 @@ def run_server():
             port,
             shared.args.public_api_id,
             max_attempts=3,
-            on_start=lambda url: logger.info(f'OpenAI-compatible API URL:\n\n{url}\n')
+            on_start=lambda url: logger.info(
+                'OpenAI-compatible API URL:\n\n%s\n', url
+            )
         )
     else:
-        url_proto = 'https://' if (ssl_certfile and ssl_keyfile) else 'http://'
+        url_proto = (
+            'https://' if (ssl_certfile and ssl_keyfile) else 'http://'
+        )
         urls = [f'{url_proto}{addr}:{port}' for addr in advertised_addrs]
         if len(urls) > 1:
-            logger.info('OpenAI-compatible API URLs:\n\n' + '\n'.join(urls) + '\n')
+            logger.info(
+                'OpenAI-compatible API URLs:\n\n%s\n', '\n'.join(urls)
+            )
         else:
-            logger.info('OpenAI-compatible API URL:\n\n' + '\n'.join(urls) + '\n')
+            logger.info(
+                'OpenAI-compatible API URL:\n\n%s\n', '\n'.join(urls)
+            )
 
     # Log API keys
     if shared.args.api_key:
         if not shared.args.admin_key:
             shared.args.admin_key = shared.args.api_key
 
-        logger.info(f'OpenAI API key:\n\n{shared.args.api_key}\n')
+        logger.info('OpenAI API key:\n\n%s\n', shared.args.api_key)
 
     if shared.args.admin_key and shared.args.admin_key != shared.args.api_key:
-        logger.info(f'OpenAI API admin key (for loading/unloading models):\n\n{shared.args.admin_key}\n')
+        logger.info(
+            'OpenAI API admin key (for loading/unloading models):\n\n%s\n',
+            shared.args.admin_key
+        )
 
     # Start server (single host string)
     logging.getLogger("uvicorn.error").propagate = False
-    uvicorn.run(app, host=bind_host, port=port, ssl_certfile=ssl_certfile, ssl_keyfile=ssl_keyfile, access_log=False)
+    uvicorn.run(
+        app,
+        host=bind_host,
+        port=port,
+        ssl_certfile=ssl_certfile,
+        ssl_keyfile=ssl_keyfile,
+        access_log=False
+    )
 
 
 def setup():

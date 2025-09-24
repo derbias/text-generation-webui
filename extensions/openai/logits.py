@@ -6,4 +6,16 @@ def _get_next_logits(body):
     # Pre-process the input payload to simulate a real generation
     use_samplers = body['use_samplers']
     state = process_parameters(body)
-    return get_next_logits(body['prompt'], state, use_samplers, "", top_logits=body['top_logits'], return_dict=True)
+    return get_next_logits(
+        body['prompt'],
+        state,
+        use_samplers,
+        "",
+        top_logits=body['top_logits'],
+        return_dict=True
+    )
+
+
+def get_next_logits_public(body):
+    """Public wrapper for next logits retrieval."""
+    return _get_next_logits(body)
