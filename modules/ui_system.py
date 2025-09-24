@@ -32,11 +32,18 @@ def _collect_logs(limit: int = 100):
 def _render_system_report():
     model = shared.model_name
     loader = shared.args.loader
+    # API keys status (non-persistent)
+    api_key_cfg = bool(getattr(shared.args, 'api_key', '') or \
+        getattr(shared.args, 'admin_key', ''))
     ext_status = _collect_extension_status()
     logs = _collect_logs()
     sections = []
     sections.append(
-        "### System\n\n- Model: {}\n- Loader: {}".format(model, loader)
+        "### System\n\n- Model: {}\n- Loader: {}\n- API keys configured: {}".format(
+            model,
+            loader,
+            'yes' if api_key_cfg else 'no'
+        )
     )
     sections.append("### Extensions\n{}".format(ext_status))
     sections.append("### Recent logs\n```\n{}\n```".format(logs))

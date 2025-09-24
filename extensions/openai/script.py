@@ -183,6 +183,17 @@ async def validate_host_header(request: Request, call_next):  # noqa: ARG001
                 content={"detail": "Invalid host header"}
             )
 
+    # bump metrics for OpenAI-compatible endpoints
+    try:
+        path = request.url.path
+        if not hasattr(shared, 'metrics'):
+            shared.metrics = {'requests_total': 0, 'endpoint_counts': {}}
+        shared.metrics['requests_total'] = shared.metrics.get('requests_total', 0) + 1
+        ec = shared.metrics.setdefault('endpoint_counts', {})
+        ec[path] = ec.get(path, 0) + 1
+    except Exception:
+        pass
+
     return await call_next(request)
 
 
