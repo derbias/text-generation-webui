@@ -85,7 +85,7 @@ class FunctionCall(BaseModel):
 
     @model_validator(mode='after')
     def checkPropertyArgsOrParams(self):
-        if not self.arguments and not self.parameters:
+        if self.arguments is None and self.parameters is None:
             raise ValueError("At least one of 'arguments' or 'parameters' must be provided as property in FunctionCall type")
         return self
 
