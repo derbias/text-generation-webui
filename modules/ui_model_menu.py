@@ -21,6 +21,7 @@ from modules.models_settings import (
     update_model_parameters
 )
 from modules.utils import gradio, temporary_settings, temporary_attrs
+from modules.hardware import suggest_gpu_layers
 
 
 def create_ui():
@@ -445,6 +446,9 @@ def preflight_model(selected_model, state):
                     auto_adjust=True,
                     for_ui=True
                 )
+        # Apply hardware heuristic as a secondary suggestion if auto-adjust returns None
+        if adjusted_layers is None:
+            adjusted_layers = suggest_gpu_layers(selected_model, gpu_layers, ctx_size)
 
         adjusted_str = f"Suggested gpu-layers: {adjusted_layers}" if adjusted_layers is not None else ""
         return f"### Preflight for `{selected_model}`\n\n{vram_info}\n\n{adjusted_str}"
