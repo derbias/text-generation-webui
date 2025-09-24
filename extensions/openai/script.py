@@ -344,12 +344,26 @@ async def handle_api_keys_info():
     """
     Returns whether API/Admin keys are configured. Does not reveal or store keys.
     """
-    has_api_key = bool(getattr(shared.args, 'api_key', '') or os.environ.get('OPENEDAI_API_KEY', ''))
-    has_admin_key = bool(getattr(shared.args, 'admin_key', '') or os.environ.get('OPENEDAI_ADMIN_KEY', ''))
+    def _mask(value: str):
+        if not value:
+            return ''
+        n = len(value)
+        if n <= 4:
+            return '*' * n
+        return ('*' * (n - 4)) + value[-4:]
+
+    api_key_val = getattr(shared.args, 'api_key', '') or os.environ.get('OPENEDAI_API_KEY', '')
+    admin_key_val = getattr(shared.args, 'admin_key', '') or os.environ.get('OPENEDAI_ADMIN_KEY', '')
+    has_api_key = bool(api_key_val)
+    has_admin_key = bool(admin_key_val)
     payload = {
         "configured": {
             "api_key": has_api_key,
             "admin_key": has_admin_key
+        },
+        "masked": {
+            "api_key": _mask(api_key_val) if has_api_key else '',
+            "admin_key": _mask(admin_key_val) if has_admin_key else ''
         }
     }
     return JSONResponse(content=payload)
@@ -371,7 +385,7 @@ async def handle_api_keys_validate(request: Request):
     if key_type not in ('api', 'admin'):
         raise HTTPException(status_code=400, detail="type must be 'api' or 'admin'")
 
-    expected = getattr(shared.args, 'api_key' if key_type == 'api' else 'admin_key', '')
+    expected = getattr(shared.args, 'api_key' if key_type == 'api' else 'admin_key', '') or os.environ.get('OPENEDAI_API_KEY' if key_type == 'api' else 'OPENEDAI_ADMIN_KEY', '')
     valid = bool(expected) and (key_value == expected)
     return JSONResponse(content={"valid": valid})
 
