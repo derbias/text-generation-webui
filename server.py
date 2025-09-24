@@ -236,12 +236,14 @@ def create_interface():
 
             # Minimal in-memory counters
             if not hasattr(shared, 'metrics'):
-                shared.metrics = {'requests_total': 0}
+                shared.metrics = {'requests_total': 0, 'in_flight': 0, 'tokens_total': 0, 'endpoint_counts': {}, 'queue_depth': 0, 't_last': time.time()}
 
             @app.middleware('http')
             async def _metrics_mw(request, call_next):
                 try:
                     shared.metrics['requests_total'] += 1
+                    path = request.url.path
+                    shared.metrics['endpoint_counts'][path] = shared.metrics['endpoint_counts'].get(path, 0) + 1
                 except Exception:
                     pass
                 response = await call_next(request)
@@ -253,11 +255,18 @@ def create_interface():
                 total = shared.metrics.get('requests_total', 0)
                 inflight = shared.metrics.get('in_flight', 0)
                 tokens = shared.metrics.get('tokens_total', 0)
-                return (
-                    f"requests_total {total}\n"
-                    f"in_flight {inflight}\n"
-                    f"tokens_total {tokens}\n"
-                )
+                queue_depth = shared.metrics.get('queue_depth', 0)
+                # tokens/sec estimate using last 60s window not persisted; simple snapshot omitted
+                lines = [
+                    f"requests_total {total}",
+                    f"in_flight {inflight}",
+                    f"tokens_total {tokens}",
+                    f"queue_depth {queue_depth}",
+                ]
+                for path, count in shared.metrics.get('endpoint_counts', {}).items():
+                    mname = 'endpoint_requests_total'
+                    lines.append(f'{mname}{{path="{path}"}} {count}')
+                return "\n".join(lines) + "\n"
         except Exception:
             pass
 
