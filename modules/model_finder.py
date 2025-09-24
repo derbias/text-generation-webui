@@ -116,30 +116,61 @@ def find_compatible_models():
     system_info = get_system_info()
     hf_api = HfApi()
     compatible_models_list = []
-
-    # Search for text-generation models
+    
+    # Search for models across multiple pipelines
     # This can be slow and might need pagination or more specific filtering
     # Increased limit for better results
-    models = hf_api.list_models(
-        pipeline_tag="text-generation",
-        sort="downloads",
-        direction=-1, # Most downloaded first
-        limit=200 # Limit to top 200 for now
-    )
+    pipeline_tags = [
+        "text-generation",
+        "text2text-generation",
+        "image-text-to-text",
+        "text-to-image",
+        "audio-to-audio",
+        "automatic-speech-recognition",
+    ]
 
+    models = []
+    for tag in pipeline_tags:
+        try:
+            results = hf_api.list_models(
+                pipeline_tag=tag,
+                sort="downloads",
+                direction=-1,  # Most downloaded first
+                limit=200
+            )
+            for m in results:
+                # Annotate the pipeline for display
+                try:
+                    setattr(m, "_pipeline_tag", tag)
+                except Exception:
+                    pass
+            models.extend(results)
+        except Exception as e:
+            logger.warning(f"Failed to list models for pipeline {tag}: {e}")
+
+    # De-duplicate by modelId keeping the first occurrence (most downloaded first per tag)
+    seen = set()
+    unique_models = []
     for model in models:
+        model_id = getattr(model, "modelId", None)
+        if model_id and model_id not in seen:
+            unique_models.append(model)
+            seen.add(model_id)
+
+    for model in unique_models:
         is_compatible, required_vram, loader = estimate_model_compatibility(model, system_info)
         if is_compatible:
             compatible_models_list.append({
                 "model_id": model.modelId,
                 "required_vram": f"{required_vram:.2f} GB",
-                "recommended_loader": loader
+                "recommended_loader": loader,
+                "pipeline": getattr(model, "_pipeline_tag", getattr(model, "pipeline_tag", "unknown"))
             })
 
     if compatible_models_list:
         output = f"### Compatible Models Found (Estimated VRAM for your {system_info['gpu_type']} with {system_info['vram_gb']} GB VRAM):\n\n"
         for m in compatible_models_list:
-            output += f"- **{m['model_id']}** (Estimated VRAM: {m['required_vram']}, Recommended Loader: {m['recommended_loader']})\n"
+            output += f"- **{m['model_id']}** [{m['pipeline']}] (Estimated VRAM: {m['required_vram']}, Recommended Loader: {m['recommended_loader']})\n"
         return output
     else:
         return f"No compatible models found based on current heuristics for your {system_info['gpu_type']} with {system_info['vram_gb']} GB VRAM."
